@@ -10,7 +10,7 @@ import { campaignsAPI } from '../lib/api';
 import { useToast } from '../lib/useToast';
 
 interface Campaign {
-  id: number;
+  id: string;
   name: string;
   subject: string;
   sender: string;
@@ -35,6 +35,8 @@ const Campaigns = () => {
   const [error, setError] = useState<string | null>(null);
   const { toasts, showSuccess, showError, hideToast } = useToast();
   const [statusFilter, setStatusFilter] = useState('All');
+  const [groupFilter, setGroupFilter] = useState('All');
+  const [groups, setGroups] = useState<string[]>([]);
 
   // Status options
   const statusOptions = ['All', 'draft', 'scheduled', 'sent'];
@@ -73,6 +75,10 @@ const Campaigns = () => {
       }));
       
       setCampaigns(campaignsWithUI);
+      
+      // Extract unique groups for filter
+      const uniqueGroups = [...new Set(campaignsWithUI.map((c: Campaign) => c.group).filter(Boolean))] as string[];
+      setGroups(uniqueGroups);
     } catch (err: any) {
       console.error('Error fetching campaigns:', err);
       setError(err.response?.data?.message || 'Failed to load campaigns');
@@ -86,11 +92,11 @@ const Campaigns = () => {
     navigate('/campaigns/new');
   };
 
-  const handleEditCampaign = (id: number) => {
+  const handleEditCampaign = (id: string) => {
     navigate(`/campaigns/edit/${id}`);
   };
 
-  const handleDeleteCampaign = async (id: number) => {
+  const handleDeleteCampaign = async (id: string) => {
     const campaign = campaigns.find(c => c.id === id);
     if (!campaign) return;
 
@@ -98,7 +104,7 @@ const Campaigns = () => {
     if (!confirmed) return;
 
     try {
-      await campaignsAPI.delete(id.toString());
+      await campaignsAPI.delete(id);
       // Refresh the campaigns list
       await fetchCampaigns();
       showSuccess('Campaign deleted successfully');
@@ -108,15 +114,21 @@ const Campaigns = () => {
     }
   };
 
-  const handleMoreActions = (id: number) => {
+  const handleViewAnalytics = (id: string) => {
+    navigate(`/campaigns/analytics/${id}`);
+  };
+
+  const handleMoreActions = (id: string) => {
     // In a real app, this would show a dropdown menu with more actions
     console.log(`More actions for campaign ${id}`);
   };
 
-  // Filter campaigns by status
-  const filteredCampaigns = statusFilter === 'All' 
-    ? campaigns 
-    : campaigns.filter(campaign => campaign.status === statusFilter);
+  // Filter campaigns by status and group
+  const filteredCampaigns = campaigns.filter(campaign => {
+    const statusMatch = statusFilter === 'All' || campaign.status === statusFilter;
+    const groupMatch = groupFilter === 'All' || campaign.group === groupFilter;
+    return statusMatch && groupMatch;
+  });
 
   // Show loading state
   if (loading) {
@@ -170,21 +182,42 @@ const Campaigns = () => {
 
       {/* Filters */}
       <div className="flex justify-between items-center">
-        <div className="flex items-center">
-          <span className="text-sm font-medium mr-2">Status:</span>
-          <div className="relative">
-            <select 
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="btn-secondary py-2 px-4 pr-8 appearance-none bg-white border-2 border-dark/20 rounded-xl"
-            >
-              {statusOptions.map(status => (
-                <option key={status} value={status}>
-                  {status === 'All' ? 'All' : status.charAt(0).toUpperCase() + status.slice(1)}
-                </option>
-              ))}
-            </select>
-            <ChevronDownIcon className="w-4 h-4 absolute right-2 top-1/2 transform -translate-y-1/2 pointer-events-none" />
+        <div className="flex items-center space-x-6">
+          <div className="flex items-center">
+            <span className="text-sm font-medium mr-2">Status:</span>
+            <div className="relative">
+              <select 
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="btn-secondary py-2 px-4 pr-8 appearance-none bg-white border-2 border-dark/20 rounded-xl"
+              >
+                {statusOptions.map(status => (
+                  <option key={status} value={status}>
+                    {status === 'All' ? 'All' : status.charAt(0).toUpperCase() + status.slice(1)}
+                  </option>
+                ))}
+              </select>
+              <ChevronDownIcon className="w-4 h-4 absolute right-2 top-1/2 transform -translate-y-1/2 pointer-events-none" />
+            </div>
+          </div>
+          
+          <div className="flex items-center">
+            <span className="text-sm font-medium mr-2">Group:</span>
+            <div className="relative">
+              <select 
+                value={groupFilter}
+                onChange={(e) => setGroupFilter(e.target.value)}
+                className="btn-secondary py-2 px-4 pr-8 appearance-none bg-white border-2 border-dark/20 rounded-xl"
+              >
+                <option value="All">All Groups</option>
+                {groups.map(group => (
+                  <option key={group} value={group}>
+                    {group}
+                  </option>
+                ))}
+              </select>
+              <ChevronDownIcon className="w-4 h-4 absolute right-2 top-1/2 transform -translate-y-1/2 pointer-events-none" />
+            </div>
           </div>
         </div>
         <div className="text-sm text-gray-500">
@@ -220,12 +253,10 @@ const Campaigns = () => {
           <table className="w-full">
             <thead className="table-header">
               <tr>
-                <th className="p-4 text-left">Campaign Name</th>
+                <th className="p-4 text-left">Campaign</th>
+                <th className="p-4 text-left">Date Created</th>
+                <th className="p-4 text-left">Group</th>
                 <th className="p-4 text-left">Status</th>
-                <th className="p-4 text-left">Created Date</th>
-                <th className="p-4 text-left">Last Sent</th>
-                <th className="p-4 text-left">Recipients</th>
-                <th className="p-4 text-left">Open Rate</th>
                 <th className="p-4 text-left">Actions</th>
               </tr>
             </thead>
@@ -237,6 +268,7 @@ const Campaigns = () => {
                   onEdit={handleEditCampaign}
                   onDelete={handleDeleteCampaign}
                   onMore={handleMoreActions}
+                  onViewAnalytics={handleViewAnalytics}
                 />
               ))}
             </tbody>
