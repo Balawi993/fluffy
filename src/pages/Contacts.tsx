@@ -8,7 +8,7 @@ import {
   UserGroupIcon
 } from '@heroicons/react/24/outline';
 import { ContactRow, Toast } from '../components';
-import { contactsAPI } from '../lib/api';
+import { contactsAPI, groupsAPI } from '../lib/api';
 import { useToast } from '../lib/useToast';
 
 interface Contact {
@@ -17,13 +17,20 @@ interface Contact {
   email: string;
   tags: string;
   group: string;
+  groupId?: string;
   createdAt?: string;
   updatedAt?: string;
+}
+
+interface Group {
+  id: string;
+  name: string;
 }
 
 const Contacts = () => {
   // State
   const [contacts, setContacts] = useState<Contact[]>([]);
+  const [groups, setGroups] = useState<Group[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { toasts, showSuccess, showError, hideToast } = useToast();
@@ -39,10 +46,13 @@ const Contacts = () => {
     tags: '',
     group: ''
   });
+  const [isNewGroup, setIsNewGroup] = useState(false);
+  const [newGroupName, setNewGroupName] = useState('');
 
   // Fetch contacts on mount
   useEffect(() => {
     fetchContacts();
+    fetchGroups();
   }, []);
 
   const fetchContacts = async () => {
@@ -60,6 +70,15 @@ const Contacts = () => {
       setError(err.response?.data?.message || 'Failed to load contacts');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchGroups = async () => {
+    try {
+      const response = await groupsAPI.getAll();
+      setGroups(response.data.data?.data || []);
+    } catch (err: any) {
+      console.error('Error fetching groups:', err);
     }
   };
 
@@ -97,6 +116,8 @@ const Contacts = () => {
       tags: '',
       group: ''
     });
+    setIsNewGroup(false);
+    setNewGroupName('');
     setIsModalOpen(true);
   };
 
@@ -109,6 +130,8 @@ const Contacts = () => {
       tags: '',
       group: ''
     });
+    setIsNewGroup(false);
+    setNewGroupName('');
   };
 
   const handleSave = async () => {
@@ -119,6 +142,9 @@ const Contacts = () => {
 
     try {
       setSaving(true);
+      
+      // Determine final group name
+      const finalGroupName = isNewGroup ? newGroupName.trim() : formData.group;
 
       if (editingContact) {
         // Update existing contact
@@ -126,7 +152,7 @@ const Contacts = () => {
           name: formData.name.trim(),
           email: formData.email.trim(),
           tags: formData.tags.trim() || undefined,
-          group: formData.group.trim() || undefined
+          group: finalGroupName || undefined
         });
         showSuccess('Contact updated successfully');
       } else {
@@ -135,13 +161,14 @@ const Contacts = () => {
           name: formData.name.trim(),
           email: formData.email.trim(),
           tags: formData.tags.trim() || undefined,
-          group: formData.group.trim() || undefined
+          group: finalGroupName || undefined
         });
         showSuccess('Contact created successfully');
       }
 
-      // Refresh the contacts list
+      // Refresh the contacts list and groups
       await fetchContacts();
+      await fetchGroups();
       handleCloseModal();
     } catch (err: any) {
       console.error('Error saving contact:', err);
@@ -158,6 +185,20 @@ const Contacts = () => {
     }));
   };
 
+  const handleGroupChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const value = e.target.value;
+    if (value === 'new') {
+      setIsNewGroup(true);
+      setNewGroupName('');
+    } else {
+      setIsNewGroup(false);
+      setFormData(prev => ({
+        ...prev,
+        group: value
+      }));
+    }
+  };
+
   const handleEditContact = (id: string) => {
     const contact = contacts.find(c => c.id === id);
     if (contact) {
@@ -168,6 +209,8 @@ const Contacts = () => {
         tags: contact.tags || '',
         group: contact.group || ''
       });
+      setIsNewGroup(false);
+      setNewGroupName('');
       setIsModalOpen(true);
     }
   };
@@ -253,207 +296,227 @@ const Contacts = () => {
         </div>
       )}
 
-      {/* Filters and Search */}
-      <div className="flex flex-col md:flex-row justify-between gap-4">
-        <div className="relative max-w-md w-full">
-          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-            <MagnifyingGlassIcon className="h-5 w-5 text-gray-400" />
-          </div>
-          <input 
-            type="text" 
-            className="input pl-10" 
-            placeholder="Search contacts..." 
+      {/* Filters */}
+      <div className="flex flex-wrap gap-4 items-center">
+        <div className="relative flex-grow max-w-md">
+          <input
+            type="text"
+            placeholder="Search contacts..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-10 pr-4 py-2 border rounded-lg"
           />
+          <MagnifyingGlassIcon className="absolute left-3 top-2.5 w-5 h-5 text-gray-400" />
         </div>
-
-        <div className="flex space-x-4">
-          <div className="relative">
-            <button className="btn-secondary py-2 px-4 flex items-center">
-              <span>Group: {selectedGroup}</span>
-              <ChevronDownIcon className="w-4 h-4 ml-2" />
-            </button>
-          </div>
-
-          {selectedContacts.length > 0 && (
-            <div className="relative">
-              <button className="btn-secondary py-2 px-4 flex items-center">
-                <span>Bulk Actions ({selectedContacts.length})</span>
-                <ChevronDownIcon className="w-4 h-4 ml-2" />
-              </button>
-            </div>
-          )}
+        
+        <div className="relative">
+          <select
+            value={selectedGroup}
+            onChange={(e) => setSelectedGroup(e.target.value)}
+            className="appearance-none pl-10 pr-8 py-2 border rounded-lg"
+          >
+            <option value="All">All Groups</option>
+            {groups.map(group => (
+              <option key={group.id} value={group.name}>{group.name}</option>
+            ))}
+          </select>
+          <UserGroupIcon className="absolute left-3 top-2.5 w-5 h-5 text-gray-400" />
+          <ChevronDownIcon className="absolute right-2 top-2.5 w-5 h-5 text-gray-400" />
         </div>
       </div>
 
-      {/* Contacts Table or Empty State */}
-      {contacts.length === 0 && !loading ? (
-        <div className="card">
-          <div className="flex flex-col items-center justify-center py-16 text-center">
-            <UserGroupIcon className="w-24 h-24 text-gray-400 mb-6" />
-            <h3 className="text-xl font-semibold text-gray-600 mb-2">No contacts found</h3>
-            <p className="text-gray-500 mb-6 max-w-md">
-              {searchQuery || selectedGroup !== 'All' 
-                ? 'No contacts match your current filters. Try adjusting your search or group filter.'
-                : 'Add your first contact to get started! You can import contacts from a CSV file or add them individually.'
-              }
-            </p>
-            <div className="flex space-x-3">
-              <button 
-                className="btn-primary py-2 px-4 flex items-center"
-                onClick={handleOpenModal}
-              >
-                <PlusCircleIcon className="w-5 h-5 mr-2" />
-                Add Contact
-              </button>
-              <button className="btn-secondary py-2 px-4 flex items-center">
-                <ArrowUpTrayIcon className="w-5 h-5 mr-2" />
-                Import CSV
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : (
-        <div className="table-container">
+      {/* Contacts Table */}
+      <div className="card">
+        {contacts.length > 0 ? (
           <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="table-header">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead>
                 <tr>
-                  <th className="p-4 text-left">
+                  <th className="w-10 px-4 py-3 text-left">
                     <input 
                       type="checkbox" 
                       onChange={handleSelectAll}
-                      checked={selectedContacts.length === contacts.length && contacts.length > 0}
+                      checked={selectedContacts.length > 0 && selectedContacts.length === contacts.length}
+                      className="rounded border-gray-300"
                     />
                   </th>
-                  <th className="p-4 text-left font-semibold">Name</th>
-                  <th className="p-4 text-left font-semibold">Email</th>
-                  <th className="p-4 text-left font-semibold">Tags</th>
-                  <th className="p-4 text-left font-semibold">Group</th>
-                  <th className="p-4 text-left font-semibold">Actions</th>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-500 uppercase tracking-wider">
+                    Name
+                  </th>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-500 uppercase tracking-wider">
+                    Email
+                  </th>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-500 uppercase tracking-wider">
+                    Group
+                  </th>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-500 uppercase tracking-wider">
+                    Tags
+                  </th>
+                  <th className="w-20 px-4 py-3"></th>
                 </tr>
               </thead>
-              <tbody className="divide-y-2 divide-dark/10">
+              <tbody className="divide-y divide-gray-200">
                 {contacts.map((contact) => (
-                  <ContactRow
+                  <ContactRow 
                     key={contact.id}
                     contact={contact}
                     isSelected={selectedContacts.includes(contact.id)}
-                    onSelect={handleSelectContact}
-                    onEdit={handleEditContact}
-                    onDelete={handleDeleteContact}
-                    onMore={handleMoreActions}
+                    onSelect={() => handleSelectContact(contact.id)}
+                    onEdit={() => handleEditContact(contact.id)}
+                    onDelete={() => handleDeleteContact(contact.id)}
+                    onMoreActions={() => handleMoreActions(contact.id)}
                   />
                 ))}
               </tbody>
             </table>
           </div>
-        </div>
-      )}
+        ) : (
+          <div className="flex flex-col items-center justify-center py-16">
+            <UserGroupIcon className="w-16 h-16 text-gray-300 mb-4" />
+            <h3 className="text-xl font-medium text-gray-900 mb-1">No contacts found</h3>
+            <p className="text-gray-500 mb-6">
+              {searchQuery || selectedGroup !== 'All' 
+                ? 'Try adjusting your search or filter criteria'
+                : 'Get started by adding your first contact'}
+            </p>
+            <button 
+              className="btn-primary py-2 px-4"
+              onClick={handleOpenModal}
+            >
+              Add Contact
+            </button>
+          </div>
+        )}
+      </div>
 
-      {/* Add Contact Modal */}
+      {/* Add/Edit Contact Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full mx-4">
-            <div className="flex justify-between items-center p-6 border-b-2 border-dark/10">
-              <h2 className="text-xl font-bold">{editingContact ? 'Edit Contact' : 'Add New Contact'}</h2>
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4 overflow-hidden">
+            <div className="flex justify-between items-center px-6 py-4 border-b">
+              <h3 className="text-lg font-medium">
+                {editingContact ? 'Edit Contact' : 'Add New Contact'}
+              </h3>
               <button 
                 onClick={handleCloseModal}
-                className="p-2 hover:bg-gray-100 rounded-full"
-                disabled={saving}
+                className="text-gray-400 hover:text-gray-500"
               >
                 <XMarkIcon className="w-5 h-5" />
               </button>
             </div>
             
-            <div className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium mb-2">Name *</label>
-                <input 
-                  type="text" 
-                  className="input" 
-                  value={formData.name}
-                  onChange={(e) => handleInputChange('name', e.target.value)}
-                  placeholder="Enter contact name"
-                  disabled={saving}
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium mb-2">Email *</label>
-                <input 
-                  type="email" 
-                  className="input" 
-                  value={formData.email}
-                  onChange={(e) => handleInputChange('email', e.target.value)}
-                  placeholder="Enter email address"
-                  disabled={saving}
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium mb-2">Tags</label>
-                <input 
-                  type="text" 
-                  className="input" 
-                  value={formData.tags}
-                  onChange={(e) => handleInputChange('tags', e.target.value)}
-                  placeholder="Enter tags separated by commas"
-                  disabled={saving}
-                />
-                <p className="text-xs text-gray-500 mt-1">Separate multiple tags with commas</p>
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium mb-2">Group</label>
-                <input 
-                  type="text" 
-                  className="input" 
-                  value={formData.group}
-                  onChange={(e) => handleInputChange('group', e.target.value)}
-                  placeholder="Enter group name"
-                  disabled={saving}
-                />
+            <div className="px-6 py-4">
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Name
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.name}
+                    onChange={(e) => handleInputChange('name', e.target.value)}
+                    className="w-full px-3 py-2 border rounded-md"
+                    placeholder="John Doe"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Email
+                  </label>
+                  <input
+                    type="email"
+                    value={formData.email}
+                    onChange={(e) => handleInputChange('email', e.target.value)}
+                    className="w-full px-3 py-2 border rounded-md"
+                    placeholder="john@example.com"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Group
+                  </label>
+                  {isNewGroup ? (
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="text"
+                        value={newGroupName}
+                        onChange={(e) => setNewGroupName(e.target.value)}
+                        className="flex-grow px-3 py-2 border rounded-md"
+                        placeholder="New group name"
+                      />
+                      <button 
+                        onClick={() => setIsNewGroup(false)}
+                        className="text-gray-400 hover:text-gray-500"
+                      >
+                        <XMarkIcon className="w-5 h-5" />
+                      </button>
+                    </div>
+                  ) : (
+                    <select
+                      value={formData.group}
+                      onChange={handleGroupChange}
+                      className="w-full px-3 py-2 border rounded-md"
+                    >
+                      <option value="">No Group</option>
+                      {groups.map(group => (
+                        <option key={group.id} value={group.name}>{group.name}</option>
+                      ))}
+                      <option value="new">+ Create New Group</option>
+                    </select>
+                  )}
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Tags (comma separated)
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.tags}
+                    onChange={(e) => handleInputChange('tags', e.target.value)}
+                    className="w-full px-3 py-2 border rounded-md"
+                    placeholder="customer, lead, etc."
+                  />
+                </div>
               </div>
             </div>
             
-            <div className="flex justify-end space-x-3 p-6 border-t-2 border-dark/10">
-              <button 
+            <div className="px-6 py-4 bg-gray-50 flex justify-end space-x-3">
+              <button
                 onClick={handleCloseModal}
                 className="btn-secondary py-2 px-4"
                 disabled={saving}
               >
                 Cancel
               </button>
-              <button 
+              <button
                 onClick={handleSave}
                 className="btn-primary py-2 px-4 flex items-center"
                 disabled={saving}
               >
-                {saving ? (
-                  <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                    Saving...
-                  </>
-                ) : (
-                  editingContact ? 'Update Contact' : 'Save Contact'
+                {saving && (
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
                 )}
+                {editingContact ? 'Update Contact' : 'Add Contact'}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Toast Notifications */}
-      {toasts.map((toast) => (
-        <Toast
-          key={toast.id}
-          message={toast.message}
-          type={toast.type}
-          onClose={() => hideToast(toast.id)}
-        />
-      ))}
+      {/* Toast notifications */}
+      <div className="fixed bottom-5 right-5 space-y-3 z-50">
+        {toasts.map((toast) => (
+          <Toast
+            key={toast.id}
+            type={toast.type}
+            message={toast.message}
+            onClose={() => hideToast(toast.id)}
+          />
+        ))}
+      </div>
     </div>
   );
 };

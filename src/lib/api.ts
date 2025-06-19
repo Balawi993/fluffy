@@ -66,6 +66,10 @@ export const contactsAPI = {
     api.delete(`/contacts/${id}`),
 };
 
+export const groupsAPI = {
+  getAll: () => api.get('/groups'),
+};
+
 export const templatesAPI = {
   getAll: (params?: { page?: number; limit?: number; search?: string }) => 
     api.get('/templates', { params }),

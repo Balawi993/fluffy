@@ -106,6 +106,31 @@ const getRawBody = (req) => {
   });
 };
 
+// Helper function to get or create a group
+const getOrCreateGroup = async (userId, groupName) => {
+  if (!groupName) return null;
+  
+  // Try to find existing group
+  let group = await prisma.group.findFirst({
+    where: {
+      userId,
+      name: groupName
+    }
+  });
+  
+  // Create new group if it doesn't exist
+  if (!group) {
+    group = await prisma.group.create({
+      data: {
+        name: groupName,
+        userId
+      }
+    });
+  }
+  
+  return group;
+};
+
 const server = http.createServer(async (req, res) => {
   const parsedUrl = url.parse(req.url, true);
   const path = parsedUrl.pathname;
@@ -365,13 +390,21 @@ const server = http.createServer(async (req, res) => {
       try {
         const contacts = await prisma.contact.findMany({
           where: { userId: decoded.userId },
+          include: { group: true },
           orderBy: { createdAt: 'desc' }
         });
+
+        // Transform the response to include group name
+        const transformedContacts = contacts.map(contact => ({
+          ...contact,
+          group: contact.group?.name || null,
+          groupId: contact.groupId
+        }));
 
         sendJSON(res, 200, {
           success: true,
           data: {
-            data: contacts
+            data: transformedContacts
           }
         }, origin);
         return;
@@ -408,7 +441,7 @@ const server = http.createServer(async (req, res) => {
       }
 
       const body = await parseBody(req);
-      const { name, email, tags, group } = body;
+      const { name, email, tags, group: groupName } = body;
 
       // Validation
       if (!name || !email) {
@@ -420,21 +453,35 @@ const server = http.createServer(async (req, res) => {
       }
 
       try {
+        // Handle group
+        let groupId = null;
+        if (groupName) {
+          const group = await getOrCreateGroup(decoded.userId, groupName);
+          groupId = group.id;
+        }
+
         const contact = await prisma.contact.create({
           data: {
             name,
             email,
             tags: tags || null,
-            group: group || null,
+            groupId,
             userId: decoded.userId
-          }
+          },
+          include: { group: true }
         });
+
+        // Transform the response to include group name
+        const transformedContact = {
+          ...contact,
+          group: contact.group?.name || null
+        };
 
         sendJSON(res, 201, {
           success: true,
           message: 'Contact created successfully',
           data: {
-            data: contact
+            data: transformedContact
           }
         }, origin);
         return;
@@ -472,7 +519,7 @@ const server = http.createServer(async (req, res) => {
 
       const contactId = path.split('/')[3];
       const body = await parseBody(req);
-      const { name, email, tags, group } = body;
+      const { name, email, tags, group: groupName } = body;
 
       // Validation
       if (!name || !email) {
@@ -500,21 +547,35 @@ const server = http.createServer(async (req, res) => {
           return;
         }
 
+        // Handle group
+        let groupId = null;
+        if (groupName) {
+          const group = await getOrCreateGroup(decoded.userId, groupName);
+          groupId = group.id;
+        }
+
         const contact = await prisma.contact.update({
           where: { id: contactId },
           data: {
             name,
             email,
             tags: tags || null,
-            group: group || null
-          }
+            groupId
+          },
+          include: { group: true }
         });
+
+        // Transform the response to include group name
+        const transformedContact = {
+          ...contact,
+          group: contact.group?.name || null
+        };
 
         sendJSON(res, 200, {
           success: true,
           message: 'Contact updated successfully',
           data: {
-            data: contact
+            data: transformedContact
           }
         }, origin);
         return;
@@ -1281,6 +1342,55 @@ const server = http.createServer(async (req, res) => {
     }
 
     // =========================
+    // GROUPS ENDPOINTS WITH PRISMA
+    // =========================
+
+    // Get all groups
+    if (path === '/api/groups' && method === 'GET') {
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        sendJSON(res, 401, {
+          success: false,
+          message: 'Access token required'
+        }, origin);
+        return;
+      }
+
+      const token = authHeader.substring(7);
+      const decoded = verifyToken(token);
+      
+      if (!decoded) {
+        sendJSON(res, 401, {
+          success: false,
+          message: 'Invalid token'
+        }, origin);
+        return;
+      }
+
+      try {
+        const groups = await prisma.group.findMany({
+          where: { userId: decoded.userId },
+          orderBy: { name: 'asc' }
+        });
+
+        sendJSON(res, 200, {
+          success: true,
+          data: {
+            data: groups
+          }
+        }, origin);
+        return;
+      } catch (error) {
+        console.error('Get groups error:', error);
+        sendJSON(res, 500, {
+          success: false,
+          message: 'Internal server error'
+        }, origin);
+        return;
+      }
+    }
+
+    // =========================
     // NOT FOUND
     // =========================
     
@@ -1327,6 +1437,7 @@ async function startServer() {
       console.log('   - POST /api/campaigns');
       console.log('   - PUT  /api/campaigns/:id');
       console.log('   - DELETE /api/campaigns/:id');
+      console.log('   - GET  /api/groups');
     });
   } catch (error) {
     console.error('❌ Failed to connect to database:', error);

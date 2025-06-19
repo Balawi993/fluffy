@@ -19,7 +19,7 @@ interface ContactRowProps {
   onSelect: (id: string) => void;
   onEdit?: (id: string) => void;
   onDelete?: (id: string) => void;
-  onMore?: (id: string) => void;
+  onMoreActions?: (id: string) => void;
 }
 
 const ContactRow: React.FC<ContactRowProps> = ({ 
@@ -28,7 +28,7 @@ const ContactRow: React.FC<ContactRowProps> = ({
   onSelect,
   onEdit, 
   onDelete, 
-  onMore 
+  onMoreActions 
 }) => {
   return (
     <tr className="table-row">
@@ -67,7 +67,7 @@ const ContactRow: React.FC<ContactRowProps> = ({
           </button>
           <button 
             className="action-button-more"
-            onClick={() => onMore?.(contact.id)}
+            onClick={() => onMoreActions?.(contact.id)}
           >
             <EllipsisHorizontalIcon className="w-4 h-4" />
           </button>
