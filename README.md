@@ -20,6 +20,8 @@ Fluffly is a modern email marketing platform built with React, TypeScript, and N
 - PostgreSQL database
 - JWT authentication
 - bcryptjs for password hashing
+- Resend API for email delivery
+- Svix for webhook signature verification
 
 ## Folder Structure
 
@@ -126,7 +128,36 @@ JWT_EXPIRES_IN="7d"
 PORT=5000
 NODE_ENV=development
 FRONTEND_URL="http://localhost:5173"
+RESEND_API_KEY="your-resend-api-key"
+RESEND_WEBHOOK_SECRET="your-webhook-signing-secret"
 ```
+
+## Resend Webhook Integration
+
+Fluffly integrates with Resend's webhook system to track email events:
+
+1. **Webhook Setup**:
+   - Create a webhook endpoint in your Resend dashboard
+   - Point it to `https://your-domain.com/api/webhooks/resend`
+   - Copy the webhook signing secret to your `.env` file
+
+2. **Supported Events**:
+   - `email.sent`: Email was sent
+   - `email.delivered`: Email was delivered
+   - `email.opened`: Recipient opened the email
+   - `email.clicked`: Recipient clicked a link in the email
+   - `email.bounced`: Email bounced
+   - `email.complained`: Recipient marked as spam
+
+3. **Event Storage**:
+   - Events are stored in the `EmailEvent` model
+   - Each event is linked to the campaign, user, and contact
+   - The sent email status is updated based on the latest event
+
+4. **Testing Webhooks**:
+   - Use a tool like ngrok to expose your local server
+   - Configure Resend to send webhooks to your ngrok URL
+   - Check server logs for webhook processing details
 
 ## Deployment Notes
 
@@ -143,6 +174,7 @@ FRONTEND_URL="http://localhost:5173"
 2. Configure environment variables for production
 3. Deploy the backend to your hosting service
 4. Ensure CORS is properly configured to allow requests from your frontend domain
+5. Configure Resend webhook URL to point to your production server
 
 ## Features
 
@@ -150,6 +182,7 @@ FRONTEND_URL="http://localhost:5173"
 - **Contact Management**: Create, view, edit, and delete contacts
 - **Email Templates**: Design beautiful email templates with a drag-and-drop editor
 - **Campaign Management**: Create and send email campaigns to contact groups
+- **Email Analytics**: Track email opens, clicks, and other events via webhooks
 - **Responsive Design**: Works on desktop and mobile devices
 
 ## How to Contribute
