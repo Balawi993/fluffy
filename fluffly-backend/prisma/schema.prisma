@@ -26,6 +26,7 @@ model User {
   contacts  Contact[]
   templates Template[]
   campaigns Campaign[]
+  sentEmails SentEmail[]
 }
 
 model Contact {
@@ -40,6 +41,7 @@ model Contact {
   // Relations
   user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId String
+  sentEmails SentEmail[]
 }
 
 model Template {
@@ -69,4 +71,21 @@ model Campaign {
   // Relations
   user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId   String
+  sentEmails SentEmail[]
+}
+
+model SentEmail {
+  id        String   @id @default(uuid())
+  messageId String   // Resend API message ID
+  contactEmail String
+  sentAt    DateTime @default(now())
+  status    String   @default("sent") // sent, delivered, opened, clicked, failed
+  
+  // Relations
+  campaign  Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  campaignId String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  contact   Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  contactId String
 }

@@ -19,7 +19,8 @@ import {
   EyeIcon
 } from '@heroicons/react/24/outline';
 import { Stepper } from '../components';
-import { campaignsAPI } from '../lib/api';
+import { campaignsAPI, contactsAPI } from '../lib/api';
+import { useToast } from '../lib/useToast';
 
 // Define types for blocks
 interface BlockType {
@@ -34,10 +35,82 @@ interface CanvasBlock {
   content: any;
 }
 
+// Helper function to convert email blocks to HTML
+const convertBlocksToHTML = (blocks: CanvasBlock[]): string => {
+  let html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>Email Campaign</title>
+      <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 0; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .header { font-size: 24px; font-weight: bold; text-align: center; padding: 20px 0; }
+        .text { font-size: 16px; line-height: 1.5; margin: 20px 0; }
+        .image { max-width: 100%; height: auto; margin: 20px 0; }
+        .button { display: inline-block; background-color: #FEE440; color: #333; padding: 10px 20px; 
+                  text-decoration: none; border-radius: 5px; font-weight: bold; margin: 20px 0; }
+        .spacer { height: 20px; }
+        .divider { border-top: 1px solid #ddd; margin: 20px 0; }
+        .social { text-align: center; margin: 20px 0; }
+        .social a { display: inline-block; margin: 0 10px; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+  `;
+
+  blocks.forEach(block => {
+    switch (block.type) {
+      case 'header':
+        html += `<div class="header">${block.content.text}</div>`;
+        break;
+      case 'text':
+        html += `<div class="text">${block.content.text}</div>`;
+        break;
+      case 'image':
+        html += `<img class="image" src="${block.content.src || 'https://via.placeholder.com/600x200'}" alt="${block.content.alt || 'Email image'}">`;
+        break;
+      case 'button':
+        html += `<div style="text-align: center;"><a href="${block.content.url || '#'}" class="button">${block.content.text}</a></div>`;
+        break;
+      case 'spacer':
+        html += `<div class="spacer" style="height: ${block.content.height || 20}px;"></div>`;
+        break;
+      case 'divider':
+        html += `<div class="divider"></div>`;
+        break;
+      case 'social':
+        html += `
+          <div class="social">
+            <a href="#">F</a>
+            <a href="#">T</a>
+            <a href="#">I</a>
+          </div>
+        `;
+        break;
+    }
+  });
+
+  html += `
+      </div>
+    </body>
+    </html>
+  `;
+
+  return html;
+};
+
+// Helper function to delay execution for rate limiting
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 const CampaignEditor = () => {
   const navigate = useNavigate();
   const { id } = useParams();
   const isEditing = id !== 'new';
+  const { showSuccess, showError } = useToast();
   
   // State
   const [campaignName, setCampaignName] = useState('');
@@ -58,6 +131,7 @@ const CampaignEditor = () => {
   const [dropTarget, setDropTarget] = useState<number | null>(null);
   const [isSending, setIsSending] = useState(false);
   const [sendSuccess, setSendSuccess] = useState(false);
+  const [sendProgress, setSendProgress] = useState({ total: 0, sent: 0 });
 
   // Mock data
   const recipientGroups = [
@@ -207,7 +281,7 @@ const CampaignEditor = () => {
   const handleSendCampaign = async () => {
     // Validate required fields
     if (!campaignName.trim() || !subjectLine.trim() || !senderName.trim() || !recipientGroup) {
-      alert('Please fill in all required fields in Step 1');
+      showError('Please fill in all required fields in Step 1');
       setActiveStep(0);
       return;
     }
@@ -225,22 +299,79 @@ const CampaignEditor = () => {
         status: 'draft' as const
       };
 
-      const response = await campaignsAPI.create(campaignData);
+      const campaignResponse = await campaignsAPI.create(campaignData);
       
-      // If successful, optionally send the campaign
-      if (response.data.success) {
-        // For now, just mark as success. In a real app, you might want to
-        // send the campaign immediately or save as draft
-        setSendSuccess(true);
-        
-        // Navigate back to campaigns after a delay
-        setTimeout(() => {
-          navigate('/campaigns');
-        }, 2000);
+      if (!campaignResponse.data.success) {
+        throw new Error('Failed to create campaign');
       }
+      
+      const campaignId = campaignResponse.data.data.id;
+      
+      // Convert email blocks to HTML
+      const htmlContent = convertBlocksToHTML(canvasBlocks);
+      
+      // Fetch contacts based on the selected group
+      const contactsResponse = await contactsAPI.getAll({ group: recipientGroup });
+      const contacts = contactsResponse.data?.data || [];
+      
+      if (contacts.length === 0) {
+        showError('No contacts found in the selected group');
+        setIsSending(false);
+        return;
+      }
+      
+      // Update progress state
+      setSendProgress({ total: contacts.length, sent: 0 });
+      
+      // Send emails to each contact with rate limiting (max 2 requests per second)
+      for (let i = 0; i < contacts.length; i++) {
+        const contact = contacts[i];
+        
+        try {
+          // Send email via Resend API
+          const emailResponse = await campaignsAPI.sendEmail(
+            contact.email,
+            subjectLine,
+            htmlContent,
+            `${senderName} <noreply@fluffly.com>`
+          );
+          
+          if (emailResponse.data && emailResponse.data.id) {
+            // Track the sent email in our database
+            await campaignsAPI.trackSentEmail({
+              campaignId,
+              contactId: contact.id,
+              messageId: emailResponse.data.id,
+              contactEmail: contact.email
+            });
+            
+            // Update progress
+            setSendProgress(prev => ({ ...prev, sent: prev.sent + 1 }));
+          }
+        } catch (emailError) {
+          console.error(`Failed to send email to ${contact.email}:`, emailError);
+        }
+        
+        // Rate limit: wait 500ms between requests (2 requests per second)
+        if (i < contacts.length - 1) {
+          await delay(500);
+        }
+      }
+      
+      // Update campaign status to 'sent'
+      await campaignsAPI.update(campaignId, { status: 'sent' });
+      
+      // Show success state
+      setSendSuccess(true);
+      showSuccess('Campaign sent successfully!');
+      
+      // Navigate back to campaigns after a delay
+      setTimeout(() => {
+        navigate('/campaigns');
+      }, 2000);
     } catch (error: any) {
-      console.error('Error creating campaign:', error);
-      alert(error.response?.data?.message || 'Failed to create campaign');
+      console.error('Error sending campaign:', error);
+      showError(error.response?.data?.message || 'Failed to send campaign');
     } finally {
       setIsSending(false);
     }
@@ -869,7 +1000,10 @@ const CampaignEditor = () => {
                     {isSending ? (
                       <>
                         <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-gray-500 mr-2"></div>
-                        Sending...
+                        {sendProgress.sent > 0 ? 
+                          `Sending... ${sendProgress.sent}/${sendProgress.total}` : 
+                          'Sending...'
+                        }
                       </>
                     ) : (
                       <>
@@ -882,8 +1016,8 @@ const CampaignEditor = () => {
                 
                 <div className="bg-light/50 border-2 border-dashed border-dark/20 rounded-lg p-4">
                   <p className="text-sm text-gray-600 text-center">
-                    <strong>MVP Testing Mode:</strong> This action is simulated for testing purposes only. 
-                    No actual emails will be sent.
+                    <strong>Using Resend API:</strong> Emails will be sent through the Resend API service.
+                    Rate limited to 2 emails per second.
                   </p>
                 </div>
               </div>

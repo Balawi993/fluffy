@@ -1083,8 +1083,96 @@ const server = http.createServer(async (req, res) => {
     }
 
     // =========================
+    // SENT EMAIL TRACKING ENDPOINT
+    // =========================
+
+    // Track sent email
+    if (path === '/api/campaigns/track-email' && method === 'POST') {
+      try {
+        const authHeader = req.headers.authorization;
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+          sendJSON(res, 401, {
+            success: false,
+            message: 'Access token required'
+          }, origin);
+          return;
+        }
+
+        const token = authHeader.substring(7);
+        const decoded = verifyToken(token);
+        
+        if (!decoded) {
+          sendJSON(res, 401, {
+            success: false,
+            message: 'Invalid token'
+          }, origin);
+          return;
+        }
+
+        const body = await parseBody(req);
+        const { campaignId, contactId, messageId, contactEmail } = body;
+
+        // Validate required fields
+        if (!campaignId || !contactId || !messageId || !contactEmail) {
+          sendJSON(res, 400, {
+            success: false,
+            message: 'Missing required fields'
+          }, origin);
+          return;
+        }
+
+        // Verify the campaign belongs to the user
+        const campaign = await prisma.campaign.findUnique({
+          where: { id: campaignId },
+        });
+
+        if (!campaign) {
+          sendJSON(res, 404, {
+            success: false,
+            message: 'Campaign not found'
+          }, origin);
+          return;
+        }
+
+        if (campaign.userId !== decoded.userId) {
+          sendJSON(res, 403, {
+            success: false,
+            message: 'Not authorized to access this campaign'
+          }, origin);
+          return;
+        }
+
+        // Create sent email record
+        const sentEmail = await prisma.sentEmail.create({
+          data: {
+            messageId,
+            contactEmail,
+            campaignId,
+            contactId,
+            userId: decoded.userId,
+          }
+        });
+
+        sendJSON(res, 201, { 
+          success: true, 
+          message: 'Email tracking recorded',
+          data: sentEmail
+        }, origin);
+        return;
+      } catch (error) {
+        console.error('Error tracking sent email:', error);
+        sendJSON(res, 500, {
+          success: false,
+          message: 'Server error'
+        }, origin);
+        return;
+      }
+    }
+
+    // =========================
     // NOT FOUND
     // =========================
+    
     sendJSON(res, 404, {
       success: false,
       message: 'Endpoint not found'

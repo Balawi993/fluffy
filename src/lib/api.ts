@@ -9,6 +9,15 @@ const api = axios.create({
   },
 });
 
+// Create Resend API client
+export const resendAPI = axios.create({
+  baseURL: 'https://api.resend.com',
+  headers: {
+    'Authorization': 'Bearer re_7bk19qCJ_2frULLzn4rm5AynPZ8KwqQvo',
+    'Content-Type': 'application/json',
+  },
+});
+
 // Add request interceptor to include JWT token
 api.interceptors.request.use(
   (config) => {
@@ -79,6 +88,10 @@ export const campaignsAPI = {
     api.delete(`/campaigns/${id}`),
   send: (id: string) => 
     api.post(`/campaigns/${id}/send`),
+  sendEmail: (to: string, subject: string, html: string, from: string = "Fluffly <noreply@fluffly.com>") => 
+    resendAPI.post('/emails', { from, to, subject, html }),
+  trackSentEmail: (data: { campaignId: string, contactId: string, messageId: string, contactEmail: string }) => 
+    api.post('/campaigns/track-email', data),
 };
 
 export const authAPI = {
