@@ -7,6 +7,7 @@ import Templates from './pages/Templates';
 import TemplateEditor from './pages/TemplateEditor';
 import Campaigns from './pages/Campaigns';
 import CampaignEditor from './pages/CampaignEditor';
+import CampaignAnalytics from './pages/CampaignAnalytics';
 import Settings from './pages/Settings';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
@@ -29,6 +30,7 @@ function App() {
           <Route path="/campaigns" element={<Campaigns />} />
           <Route path="/campaigns/new" element={<CampaignEditor />} />
           <Route path="/campaigns/edit/:id" element={<CampaignEditor />} />
+          <Route path="/campaigns/analytics/:id" element={<CampaignAnalytics />} />
           <Route path="/settings" element={<Settings />} />
         </Route>
       </Routes>

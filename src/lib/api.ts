@@ -94,6 +94,8 @@ export const campaignsAPI = {
     api.delete(`/campaigns/${id}`),
   send: (id: string) => 
     api.post(`/campaigns/${id}/send`),
+  sendCampaign: (data: { campaignId: string; groupName: string; subject: string; htmlContent: string; from?: string }) => 
+    api.post('/campaigns/send', data),
   sendEmail: (to: string, subject: string, html: string, from: string = "Fluffly <noreply@fluffly.com>") => 
     resendAPI.post('/emails', { from, to, subject, html }),
   trackSentEmail: (data: { campaignId: string, contactId: string, messageId: string, contactEmail: string }) => 

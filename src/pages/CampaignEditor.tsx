@@ -347,65 +347,35 @@ const CampaignEditor = () => {
       // Convert email blocks to HTML
       const htmlContent = convertBlocksToHTML(canvasBlocks);
       
-      // Fetch contacts based on the selected group
-      const contactsResponse = await contactsAPI.getAll({ group: recipientGroup });
-      const contacts = contactsResponse.data?.data || [];
-      
-      if (contacts.length === 0) {
-        showError('No contacts found in the selected group');
-        setIsSending(false);
-        return;
+      // Send campaign using the new integrated endpoint
+      const sendResponse = await campaignsAPI.sendCampaign({
+        campaignId,
+        groupName: recipientGroup,
+        subject: subjectLine.trim(),
+        htmlContent,
+        from: `${senderName.trim()} <noreply@fluffly.com>`
+      });
+
+      if (!sendResponse.data.success) {
+        throw new Error(sendResponse.data.message || 'Failed to send campaign');
       }
-      
-      // Update progress state
-      setSendProgress({ total: contacts.length, sent: 0 });
-      
-      // Send emails to each contact with rate limiting (max 2 requests per second)
-      for (let i = 0; i < contacts.length; i++) {
-        const contact = contacts[i];
-        
-        try {
-          // Send email via Resend API
-          const emailResponse = await campaignsAPI.sendEmail(
-            contact.email,
-            subjectLine,
-            htmlContent,
-            `${senderName} <noreply@fluffly.com>`
-          );
-          
-          if (emailResponse.data && emailResponse.data.id) {
-            // Track the sent email in our database
-            await campaignsAPI.trackSentEmail({
-              campaignId,
-              contactId: contact.id,
-              messageId: emailResponse.data.id,
-              contactEmail: contact.email
-            });
-            
-            // Update progress
-            setSendProgress(prev => ({ ...prev, sent: prev.sent + 1 }));
-          }
-        } catch (emailError) {
-          console.error(`Failed to send email to ${contact.email}:`, emailError);
-        }
-        
-        // Rate limit: wait 500ms between requests (2 requests per second)
-        if (i < contacts.length - 1) {
-          await delay(500);
-        }
-      }
-      
-      // Update campaign status to 'sent'
-      await campaignsAPI.update(campaignId, { status: 'sent' });
+
+      const results = sendResponse.data.data;
       
       // Show success state
-        setSendSuccess(true);
-      showSuccess('Campaign sent successfully!');
+      setSendSuccess(true);
+      
+      if (results.failed > 0) {
+        showError(`Campaign sent with some issues: ${results.sent} successful, ${results.failed} failed. Check console for details.`);
+        console.warn('Send errors:', results.errors);
+      } else {
+        showSuccess(`Campaign sent successfully to ${results.sent} contacts!`);
+      }
         
-        // Navigate back to campaigns after a delay
-        setTimeout(() => {
-          navigate('/campaigns');
-        }, 2000);
+      // Navigate to analytics page after a delay
+      setTimeout(() => {
+        navigate(`/campaigns/analytics/${campaignId}`);
+      }, 2000);
     } catch (error: any) {
       console.error('Error sending campaign:', error);
       showError(error.response?.data?.message || 'Failed to send campaign');

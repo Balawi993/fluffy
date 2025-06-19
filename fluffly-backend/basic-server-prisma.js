@@ -388,8 +388,38 @@ const server = http.createServer(async (req, res) => {
       }
 
       try {
+        // Parse query parameters
+        const url = new URL(req.url, `http://${req.headers.host}`);
+        const groupName = url.searchParams.get('group');
+        
+        // Build where clause
+        let whereClause = { userId: decoded.userId };
+        
+        // If group filter is specified, find the group and filter by groupId
+        if (groupName) {
+          const group = await prisma.group.findFirst({
+            where: {
+              name: groupName,
+              userId: decoded.userId
+            }
+          });
+          
+          if (group) {
+            whereClause.groupId = group.id;
+          } else {
+            // If group doesn't exist, return empty results
+            sendJSON(res, 200, {
+              success: true,
+              data: {
+                data: []
+              }
+            }, origin);
+            return;
+          }
+        }
+
         const contacts = await prisma.contact.findMany({
-          where: { userId: decoded.userId },
+          where: whereClause,
           include: { group: true },
           orderBy: { createdAt: 'desc' }
         });
@@ -1276,6 +1306,186 @@ const server = http.createServer(async (req, res) => {
         sendJSON(res, 500, {
           success: false,
           message: 'Internal server error'
+        }, origin);
+        return;
+      }
+    }
+
+    // =========================
+    // CAMPAIGN SENDING ENDPOINT
+    // =========================
+
+    // Send campaign to group
+    if (path === '/api/campaigns/send' && method === 'POST') {
+      try {
+        const authHeader = req.headers.authorization;
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+          sendJSON(res, 401, {
+            success: false,
+            message: 'Access token required'
+          }, origin);
+          return;
+        }
+
+        const token = authHeader.substring(7);
+        const decoded = verifyToken(token);
+        
+        if (!decoded) {
+          sendJSON(res, 401, {
+            success: false,
+            message: 'Invalid token'
+          }, origin);
+          return;
+        }
+
+        const body = await parseBody(req);
+        const { campaignId, groupName, subject, htmlContent, from } = body;
+
+        // Validate required fields
+        if (!campaignId || !groupName || !subject || !htmlContent) {
+          sendJSON(res, 400, {
+            success: false,
+            message: 'Missing required fields: campaignId, groupName, subject, htmlContent'
+          }, origin);
+          return;
+        }
+
+        // Verify the campaign belongs to the user
+        const campaign = await prisma.campaign.findUnique({
+          where: { id: campaignId },
+        });
+
+        if (!campaign) {
+          sendJSON(res, 404, {
+            success: false,
+            message: 'Campaign not found'
+          }, origin);
+          return;
+        }
+
+        if (campaign.userId !== decoded.userId) {
+          sendJSON(res, 403, {
+            success: false,
+            message: 'Not authorized to access this campaign'
+          }, origin);
+          return;
+        }
+
+        // Find the group
+        const group = await prisma.group.findFirst({
+          where: {
+            name: groupName,
+            userId: decoded.userId
+          }
+        });
+
+        if (!group) {
+          sendJSON(res, 404, {
+            success: false,
+            message: 'Group not found'
+          }, origin);
+          return;
+        }
+
+        // Get all contacts in the group
+        const contacts = await prisma.contact.findMany({
+          where: {
+            groupId: group.id,
+            userId: decoded.userId
+          }
+        });
+
+        if (contacts.length === 0) {
+          sendJSON(res, 400, {
+            success: false,
+            message: 'No contacts found in the selected group'
+          }, origin);
+          return;
+        }
+
+        // Send results tracking
+        const results = {
+          total: contacts.length,
+          sent: 0,
+          failed: 0,
+          errors: []
+        };
+
+        // Send emails via Resend API with rate limiting
+        for (let i = 0; i < contacts.length; i++) {
+          const contact = contacts[i];
+          
+          try {
+            // Prepare email data for Resend API
+            const emailData = {
+              from: from || "Fluffly <noreply@fluffly.com>",
+              to: contact.email,
+              subject: subject,
+              html: htmlContent
+            };
+
+            // Make request to Resend API
+            const resendResponse = await fetch('https://api.resend.com/emails', {
+              method: 'POST',
+              headers: {
+                'Authorization': 'Bearer re_7bk19qCJ_2frULLzn4rm5AynPZ8KwqQvo',
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(emailData)
+            });
+
+            const resendData = await resendResponse.json();
+
+            if (resendResponse.ok && resendData.id) {
+              // Track the sent email in our database
+              await prisma.sentEmail.create({
+                data: {
+                  messageId: resendData.id,
+                  contactEmail: contact.email,
+                  campaignId,
+                  contactId: contact.id,
+                  userId: decoded.userId,
+                  status: 'sent'
+                }
+              });
+
+              results.sent++;
+            } else {
+              results.failed++;
+              results.errors.push(`Failed to send to ${contact.email}: ${resendData.message || 'Unknown error'}`);
+            }
+
+          } catch (emailError) {
+            console.error(`Error sending email to ${contact.email}:`, emailError);
+            results.failed++;
+            results.errors.push(`Failed to send to ${contact.email}: ${emailError.message}`);
+          }
+
+          // Rate limiting: 2 requests per second (500ms delay)
+          if (i < contacts.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+        }
+
+        // Update campaign status to 'sent' if any emails were sent
+        if (results.sent > 0) {
+          await prisma.campaign.update({
+            where: { id: campaignId },
+            data: { status: 'sent' }
+          });
+        }
+
+        sendJSON(res, 200, { 
+          success: true, 
+          message: `Campaign sent: ${results.sent} successful, ${results.failed} failed`,
+          data: results
+        }, origin);
+        return;
+      } catch (error) {
+        console.error('Error sending campaign:', error);
+        sendJSON(res, 500, {
+          success: false,
+          message: 'Server error'
         }, origin);
         return;
       }
