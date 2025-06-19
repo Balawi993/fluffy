@@ -20,7 +20,7 @@ jobs:
         cache: 'npm'
         
     - name: Install dependencies
-      run: npm ci
+      run: npm install
       
     - name: Build frontend (skip type checking)
       run: vite build --skipTypeCheck
@@ -39,7 +39,7 @@ jobs:
         cache-dependency-path: fluffly-backend/package-lock.json
         
     - name: Install dependencies
-      run: cd fluffly-backend && npm ci
+      run: cd fluffly-backend && npm install
       
     - name: Generate Prisma client
       run: cd fluffly-backend && npx prisma generate
