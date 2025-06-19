@@ -22,8 +22,8 @@ jobs:
     - name: Install dependencies
       run: npm install
       
-    - name: Build frontend (skip type checking)
-      run: npx vite build --skipTypeCheck
+    - name: Build frontend
+      run: npm run build
       
   build-backend:
     runs-on: ubuntu-latest
