@@ -4,6 +4,7 @@ const url = require('url');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { PrismaClient } = require('./generated/prisma');
+const { Webhook } = require('svix');
 
 // Initialize Prisma Client
 const prisma = new PrismaClient();
@@ -83,6 +84,26 @@ const sendJSON = (res, statusCode, data, origin = null) => {
   
   res.writeHead(statusCode, headers);
   res.end(JSON.stringify(data));
+};
+
+// Add this function to read raw body data for webhook signature validation
+const getRawBody = (req) => {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    
+    req.on('data', (chunk) => {
+      chunks.push(chunk);
+    });
+    
+    req.on('end', () => {
+      const rawBody = Buffer.concat(chunks);
+      resolve(rawBody);
+    });
+    
+    req.on('error', (err) => {
+      reject(err);
+    });
+  });
 };
 
 const server = http.createServer(async (req, res) => {
@@ -1165,6 +1186,96 @@ const server = http.createServer(async (req, res) => {
           success: false,
           message: 'Server error'
         }, origin);
+        return;
+      }
+    }
+
+    // =========================
+    // RESEND WEBHOOK ENDPOINT
+    // =========================
+
+    // Handle Resend webhook events
+    if (path === '/api/webhooks/resend' && method === 'POST') {
+      try {
+        console.log('📩 Resend webhook received');
+        
+        // Get headers needed for signature verification
+        const svixId = req.headers['svix-id'];
+        const svixSignature = req.headers['svix-signature'];
+        const svixTimestamp = req.headers['svix-timestamp'];
+        
+        // Verify webhook signature
+        // For development purposes, we'll skip actual verification but log the headers
+        console.log('🔑 Webhook headers:', { svixId, svixSignature, svixTimestamp });
+        
+        // In production, you would verify the signature like this:
+        // const WEBHOOK_SECRET = process.env.RESEND_WEBHOOK_SECRET;
+        // const wh = new Webhook(WEBHOOK_SECRET);
+        
+        // Get raw body for signature verification
+        const rawBody = await getRawBody(req);
+        const body = JSON.parse(rawBody);
+        
+        console.log('📦 Webhook payload:', body);
+        
+        // Extract event data
+        const eventType = body.data?.event;
+        const messageId = body.data?.messageId;
+        const recipient = body.data?.recipient;
+        const timestamp = body.data?.timestamp ? new Date(body.data.timestamp) : new Date();
+        
+        if (!eventType || !messageId || !recipient) {
+          console.error('❌ Invalid webhook payload');
+          sendJSON(res, 400, { success: false, message: 'Invalid webhook payload' }, origin);
+          return;
+        }
+        
+        // Find the sent email record by messageId
+        const sentEmail = await prisma.sentEmail.findFirst({
+          where: { messageId },
+          include: {
+            campaign: true,
+            user: true,
+            contact: true
+          }
+        });
+        
+        if (!sentEmail) {
+          console.error('❌ No matching sent email found for messageId:', messageId);
+          sendJSON(res, 404, { success: false, message: 'No matching sent email found' }, origin);
+          return;
+        }
+        
+        // Create email event record
+        const emailEvent = await prisma.emailEvent.create({
+          data: {
+            eventType,
+            messageId,
+            contactEmail: recipient,
+            timestamp,
+            metadata: body.data || {},
+            campaignId: sentEmail.campaignId,
+            userId: sentEmail.userId,
+            contactId: sentEmail.contactId
+          }
+        });
+        
+        console.log('✅ Email event recorded:', emailEvent.id);
+        
+        // Update sent email status if needed
+        if (['delivered', 'opened', 'clicked', 'bounced', 'complained'].includes(eventType)) {
+          await prisma.sentEmail.update({
+            where: { id: sentEmail.id },
+            data: { status: eventType }
+          });
+        }
+        
+        // Respond with success
+        sendJSON(res, 200, { success: true, message: 'Webhook processed successfully' }, origin);
+        return;
+      } catch (error) {
+        console.error('❌ Error processing webhook:', error);
+        sendJSON(res, 500, { success: false, message: 'Error processing webhook' }, origin);
         return;
       }
     }

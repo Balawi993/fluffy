@@ -27,6 +27,7 @@ model User {
   templates Template[]
   campaigns Campaign[]
   sentEmails SentEmail[]
+  emailEvents EmailEvent[]
 }
 
 model Contact {
@@ -42,6 +43,7 @@ model Contact {
   user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId String
   sentEmails SentEmail[]
+  emailEvents EmailEvent[]
 }
 
 model Template {
@@ -72,6 +74,7 @@ model Campaign {
   user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId   String
   sentEmails SentEmail[]
+  emailEvents EmailEvent[]
 }
 
 model SentEmail {
@@ -88,4 +91,21 @@ model SentEmail {
   userId    String
   contact   Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
   contactId String
+}
+
+model EmailEvent {
+  id          String   @id @default(uuid())
+  eventType   String   // sent, delivered, opened, clicked, bounced, complained
+  messageId   String   // Resend API message ID
+  contactEmail String
+  timestamp   DateTime @default(now())
+  metadata    Json?    // Additional event data
+  
+  // Relations
+  campaign    Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  campaignId  String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId      String
+  contact     Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  contactId   String
 }
