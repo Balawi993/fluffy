@@ -18,13 +18,15 @@
   "type": "commonjs",
   "dependencies": {
     "@prisma/client": "^6.10.1",
+    "axios": "^1.6.8",
     "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",
     "dotenv": "^16.5.0",
     "express": "^5.1.0",
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.2",
-    "morgan": "^1.10.0"
+    "morgan": "^1.10.0",
+    "svix": "^1.67.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.3",

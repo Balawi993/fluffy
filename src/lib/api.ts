@@ -64,6 +64,8 @@ export const contactsAPI = {
     api.put(`/contacts/${id}`, data),
   delete: (id: string) => 
     api.delete(`/contacts/${id}`),
+  import: (data: { contacts: { name: string; email: string; tags?: string }[]; group: string }) => 
+    api.post('/contacts/import', data),
 };
 
 export const groupsAPI = {
@@ -92,8 +94,6 @@ export const campaignsAPI = {
     api.delete(`/campaigns/${id}`),
   send: (id: string) => 
     api.post(`/campaigns/${id}/send`),
-  sendEmail: (to: string, subject: string, html: string, from: string = "Fluffly <noreply@fluffly.com>") => 
-    resendAPI.post('/emails', { from, to, subject, html }),
   trackSentEmail: (data: { campaignId: string, contactId: string, messageId: string, contactEmail: string }) => 
     api.post('/campaigns/track-email', data),
 };

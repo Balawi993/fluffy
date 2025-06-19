@@ -1,18 +1,69 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   UserCircleIcon,
   EnvelopeIcon,
   InformationCircleIcon
 } from '@heroicons/react/24/outline';
+import { authAPI } from '../lib/api';
+
+interface UserInfo {
+  name: string;
+  email: string;
+}
 
 const Settings = () => {
-  // Mock data
-  const userInfo = {
-    fullName: 'John Doe',
-    email: 'john.doe@company.com'
+  const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchUserInfo();
+  }, []);
+
+  const fetchUserInfo = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const response = await authAPI.me();
+      setUserInfo(response.data.user);
+    } catch (err: any) {
+      console.error('Error fetching user info:', err);
+      setError('Failed to load user information');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const senderEmail = 'user@fluffly.com';
+  const senderEmail = userInfo?.email || 'user@fluffly.com';
+
+  if (loading) {
+    return (
+      <div className="space-y-8">
+        <div>
+          <h1 className="text-3xl font-bold">Settings</h1>
+          <p className="text-gray-600 mt-2">Loading your account information...</p>
+        </div>
+        <div className="card">
+          <div className="animate-pulse space-y-4">
+            <div className="h-4 bg-gray-200 rounded w-1/4"></div>
+            <div className="h-10 bg-gray-200 rounded"></div>
+            <div className="h-10 bg-gray-200 rounded"></div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="space-y-8">
+        <div>
+          <h1 className="text-3xl font-bold">Settings</h1>
+          <p className="text-red-600 mt-2">{error}</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8">
@@ -38,7 +89,7 @@ const Settings = () => {
               type="text"
               id="fullName"
               className="input bg-gray-50 cursor-not-allowed"
-              value={userInfo.fullName}
+              value={userInfo?.name || ''}
               disabled
               readOnly
             />
@@ -55,7 +106,7 @@ const Settings = () => {
               type="email"
               id="email"
               className="input bg-gray-50 cursor-not-allowed"
-              value={userInfo.email}
+              value={userInfo?.email || ''}
               disabled
               readOnly
             />

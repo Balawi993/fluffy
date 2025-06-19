@@ -5,6 +5,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { PrismaClient } = require('./generated/prisma');
 const { Webhook } = require('svix');
+const axios = require('axios');
 
 // Initialize Prisma Client
 const prisma = new PrismaClient();
@@ -130,6 +131,106 @@ const getOrCreateGroup = async (userId, groupName) => {
   
   return group;
 };
+
+// Helper function to convert blocks to HTML
+const convertBlocksToHTML = (blocks) => {
+  let html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>Email Campaign</title>
+      <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 0; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .header { font-size: 24px; font-weight: bold; text-align: center; padding: 20px 0; }
+        .text { font-size: 16px; line-height: 1.5; margin: 20px 0; }
+        .image { max-width: 100%; height: auto; margin: 20px 0; }
+        .button { display: inline-block; background-color: #FEE440; color: #333; padding: 10px 20px; 
+                  text-decoration: none; border-radius: 5px; font-weight: bold; margin: 20px 0; }
+        .spacer { height: 20px; }
+        .divider { border-top: 1px solid #ddd; margin: 20px 0; }
+        .social { text-align: center; margin: 20px 0; }
+        .social a { display: inline-block; margin: 0 10px; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+  `;
+
+  blocks.forEach(block => {
+    switch (block.type) {
+      case 'header':
+        html += `<div class="header">${block.content.text}</div>`;
+        break;
+      case 'text':
+        html += `<div class="text">${block.content.text}</div>`;
+        break;
+      case 'image':
+        html += `<img class="image" src="${block.content.src || 'https://via.placeholder.com/600x200'}" alt="${block.content.alt || 'Email image'}">`;
+        break;
+      case 'button':
+        html += `<div style="text-align: center;"><a href="${block.content.url || '#'}" class="button">${block.content.text}</a></div>`;
+        break;
+      case 'spacer':
+        html += `<div class="spacer" style="height: ${block.content.height || 20}px;"></div>`;
+        break;
+      case 'divider':
+        html += `<div class="divider"></div>`;
+        break;
+      case 'social':
+        html += `
+          <div class="social">
+            <a href="#">F</a>
+            <a href="#">T</a>
+            <a href="#">I</a>
+          </div>
+        `;
+        break;
+    }
+  });
+
+  html += `
+      </div>
+    </body>
+    </html>
+  `;
+
+  return html;
+};
+
+// Helper function to send email via Resend
+const sendEmailViaResend = async (to, subject, htmlContent, messageId = null) => {
+  try {
+    const response = await axios.post('https://api.resend.com/emails', {
+      from: "Fluffly <noreply@fluffly.com>",
+      to: to,
+      subject: subject,
+      html: htmlContent
+    }, {
+      headers: {
+        'Authorization': 'Bearer re_7bk19qCJ_2frULLzn4rm5AynPZ8KwqQvo',
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    return {
+      success: true,
+      messageId: response.data.id,
+      data: response.data
+    };
+  } catch (error) {
+    console.error('Resend API error:', error.response?.data || error.message);
+    return {
+      success: false,
+      error: error.response?.data?.message || error.message
+    };
+  }
+};
+
+// Helper function to delay execution for rate limiting
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 const server = http.createServer(async (req, res) => {
   const parsedUrl = url.parse(req.url, true);
@@ -410,6 +511,115 @@ const server = http.createServer(async (req, res) => {
         return;
       } catch (error) {
         console.error('Get contacts error:', error);
+        sendJSON(res, 500, {
+          success: false,
+          message: 'Internal server error'
+        }, origin);
+        return;
+      }
+    }
+
+    // Bulk import contacts
+    if (path === '/api/contacts/import' && method === 'POST') {
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        sendJSON(res, 401, {
+          success: false,
+          message: 'Access token required'
+        }, origin);
+        return;
+      }
+
+      const token = authHeader.substring(7);
+      const decoded = verifyToken(token);
+      
+      if (!decoded) {
+        sendJSON(res, 401, {
+          success: false,
+          message: 'Invalid token'
+        }, origin);
+        return;
+      }
+
+      const body = await parseBody(req);
+      const { contacts, group: groupName } = body;
+
+      // Validation
+      if (!contacts || !Array.isArray(contacts) || contacts.length === 0) {
+        sendJSON(res, 400, {
+          success: false,
+          message: 'Contacts array is required'
+        }, origin);
+        return;
+      }
+
+      if (!groupName) {
+        sendJSON(res, 400, {
+          success: false,
+          message: 'Group name is required'
+        }, origin);
+        return;
+      }
+
+      try {
+        // Handle group
+        const group = await getOrCreateGroup(decoded.userId, groupName);
+        const groupId = group.id;
+
+        // Import contacts
+        const results = {
+          success: 0,
+          failed: 0,
+          errors: []
+        };
+
+        for (const contactData of contacts) {
+          try {
+            if (!contactData.name || !contactData.email) {
+              results.failed++;
+              results.errors.push(`Contact missing name or email: ${JSON.stringify(contactData)}`);
+              continue;
+            }
+
+            // Check if contact already exists for this user
+            const existingContact = await prisma.contact.findFirst({
+              where: {
+                email: contactData.email,
+                userId: decoded.userId
+              }
+            });
+
+            if (existingContact) {
+              results.failed++;
+              results.errors.push(`Contact with email ${contactData.email} already exists`);
+              continue;
+            }
+
+            await prisma.contact.create({
+              data: {
+                name: contactData.name,
+                email: contactData.email,
+                tags: contactData.tags || null,
+                groupId,
+                userId: decoded.userId
+              }
+            });
+
+            results.success++;
+          } catch (error) {
+            results.failed++;
+            results.errors.push(`Failed to import ${contactData.email}: ${error.message}`);
+          }
+        }
+
+        sendJSON(res, 200, {
+          success: true,
+          message: `Import completed: ${results.success} contacts imported, ${results.failed} failed`,
+          data: results
+        }, origin);
+        return;
+      } catch (error) {
+        console.error('Bulk import error:', error);
         sendJSON(res, 500, {
           success: false,
           message: 'Internal server error'
@@ -1093,6 +1303,140 @@ const server = http.createServer(async (req, res) => {
         return;
       } catch (error) {
         console.error('Update campaign error:', error);
+        sendJSON(res, 500, {
+          success: false,
+          message: 'Internal server error'
+        }, origin);
+        return;
+      }
+    }
+
+    // Send campaign
+    if (path.startsWith('/api/campaigns/') && path.endsWith('/send') && method === 'POST') {
+      console.log('📧 SEND campaign request received');
+      console.log('📍 Full path:', path);
+      
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        sendJSON(res, 401, {
+          success: false,
+          message: 'Access token required'
+        }, origin);
+        return;
+      }
+
+      const token = authHeader.substring(7);
+      const decoded = verifyToken(token);
+      
+      if (!decoded) {
+        sendJSON(res, 401, {
+          success: false,
+          message: 'Invalid token'
+        }, origin);
+        return;
+      }
+
+      const campaignId = path.split('/')[3];
+
+      try {
+        // Check if campaign exists and belongs to user
+        const campaign = await prisma.campaign.findFirst({
+          where: { 
+            id: campaignId,
+            userId: decoded.userId 
+          }
+        });
+
+        if (!campaign) {
+          sendJSON(res, 404, {
+            success: false,
+            message: 'Campaign not found'
+          }, origin);
+          return;
+        }
+
+        // Find the group and get its contacts
+        const group = await prisma.group.findFirst({
+          where: {
+            name: campaign.group,
+            userId: decoded.userId
+          },
+          include: {
+            contacts: true
+          }
+        });
+
+        if (!group || group.contacts.length === 0) {
+          sendJSON(res, 400, {
+            success: false,
+            message: 'No contacts found in the selected group'
+          }, origin);
+          return;
+        }
+
+        // Convert blocks to HTML
+        const htmlContent = convertBlocksToHTML(campaign.blocks);
+
+        // Send emails to all contacts in the group
+        const results = {
+          total: group.contacts.length,
+          sent: 0,
+          failed: 0,
+          errors: []
+        };
+
+        for (const contact of group.contacts) {
+          try {
+            // Apply rate limiting (max 2 requests per second)
+            await delay(500);
+
+            const emailResult = await sendEmailViaResend(
+              contact.email,
+              campaign.subject,
+              htmlContent
+            );
+
+            if (emailResult.success) {
+              // Save sent email record
+              await prisma.sentEmail.create({
+                data: {
+                  messageId: emailResult.messageId,
+                  contactEmail: contact.email,
+                  campaignId: campaign.id,
+                  userId: decoded.userId,
+                  contactId: contact.id,
+                  status: 'sent'
+                }
+              });
+
+              results.sent++;
+              console.log(`✅ Email sent to ${contact.email}, messageId: ${emailResult.messageId}`);
+            } else {
+              results.failed++;
+              results.errors.push(`${contact.email}: ${emailResult.error}`);
+              console.log(`❌ Failed to send email to ${contact.email}: ${emailResult.error}`);
+            }
+          } catch (error) {
+            results.failed++;
+            results.errors.push(`${contact.email}: ${error.message}`);
+            console.error(`❌ Error sending to ${contact.email}:`, error);
+          }
+        }
+
+        // Update campaign status to 'sent'
+        await prisma.campaign.update({
+          where: { id: campaignId },
+          data: { status: 'sent' }
+        });
+
+        sendJSON(res, 200, {
+          success: true,
+          message: `Campaign sent successfully: ${results.sent}/${results.total} emails delivered`,
+          data: results
+        }, origin);
+        return;
+      } catch (error) {
+        console.error('Send campaign error:', error);
         sendJSON(res, 500, {
           success: false,
           message: 'Internal server error'

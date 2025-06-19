@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { 
   ArrowLeftIcon,
@@ -19,7 +19,7 @@ import {
   EyeIcon
 } from '@heroicons/react/24/outline';
 import { Stepper } from '../components';
-import { campaignsAPI, contactsAPI } from '../lib/api';
+import { campaignsAPI, contactsAPI, groupsAPI } from '../lib/api';
 import { useToast } from '../lib/useToast';
 
 // Define types for blocks
@@ -117,7 +117,7 @@ const CampaignEditor = () => {
   const [subjectLine, setSubjectLine] = useState('');
   const [senderName, setSenderName] = useState('');
   const [recipientGroup, setRecipientGroup] = useState('');
-  const [activeStep, setActiveStep] = useState(1); // Set to Step 2 (Design) as requested
+  const [activeStep, setActiveStep] = useState(0); // Start from Step 1 (Info)
   const [selectedBlock, setSelectedBlock] = useState<string | null>(null);
   const [canvasBlocks, setCanvasBlocks] = useState<CanvasBlock[]>([
     { id: 'block-1', type: 'header', content: { text: 'Welcome to our newsletter' } },
@@ -132,14 +132,51 @@ const CampaignEditor = () => {
   const [isSending, setIsSending] = useState(false);
   const [sendSuccess, setSendSuccess] = useState(false);
   const [sendProgress, setSendProgress] = useState({ total: 0, sent: 0 });
+  const [recipientGroups, setRecipientGroups] = useState<{ id: string; name: string; count?: number }[]>([]);
+  const [groupsLoading, setGroupsLoading] = useState(true);
 
-  // Mock data
-  const recipientGroups = [
-    { id: 1, name: 'All Subscribers', count: 5000 },
-    { id: 2, name: 'New Customers', count: 1250 },
-    { id: 3, name: 'Newsletter Subscribers', count: 3800 },
-    { id: 4, name: 'Inactive Users', count: 2300 }
-  ];
+  // Fetch groups on component mount
+  useEffect(() => {
+    fetchGroups();
+  }, []);
+
+  const fetchGroups = async () => {
+    try {
+      setGroupsLoading(true);
+      const response = await groupsAPI.getAll();
+      const groups = response.data.data?.data || [];
+      
+      // Get contact counts for each group
+      const groupsWithCounts = await Promise.all(
+        groups.map(async (group: any) => {
+          try {
+            const contactsResponse = await contactsAPI.getAll({ group: group.name });
+            const count = contactsResponse.data.data?.data?.length || 0;
+            return { 
+              id: group.id, 
+              name: group.name, 
+              count 
+            };
+          } catch (err) {
+            return { 
+              id: group.id, 
+              name: group.name, 
+              count: 0 
+            };
+          }
+        })
+      );
+      
+      setRecipientGroups(groupsWithCounts);
+    } catch (err: any) {
+      console.error('Error fetching groups:', err);
+      showError('Failed to load recipient groups');
+      // Fallback to empty array
+      setRecipientGroups([]);
+    } finally {
+      setGroupsLoading(false);
+    }
+  };
 
   // Steps for the stepper
   const steps = [
@@ -287,9 +324,10 @@ const CampaignEditor = () => {
     }
 
     setIsSending(true);
+    setSendProgress({ total: 0, sent: 0 });
     
     try {
-      // Create the campaign
+      // Create the campaign first
       const campaignData = {
         name: campaignName.trim(),
         subject: subjectLine.trim(),
@@ -305,73 +343,38 @@ const CampaignEditor = () => {
         throw new Error('Failed to create campaign');
       }
       
-      const campaignId = campaignResponse.data.data.id;
+      const campaign = campaignResponse.data.data.data;
+      const campaignId = campaign.id;
       
-      // Convert email blocks to HTML
-      const htmlContent = convertBlocksToHTML(canvasBlocks);
+      // Send the campaign using our new endpoint
+      const sendResponse = await campaignsAPI.send(campaignId);
       
-      // Fetch contacts based on the selected group
-      const contactsResponse = await contactsAPI.getAll({ group: recipientGroup });
-      const contacts = contactsResponse.data?.data || [];
-      
-      if (contacts.length === 0) {
-        showError('No contacts found in the selected group');
-        setIsSending(false);
-        return;
+      if (!sendResponse.data.success) {
+        throw new Error(sendResponse.data.message || 'Failed to send campaign');
       }
       
-      // Update progress state
-      setSendProgress({ total: contacts.length, sent: 0 });
+      const results = sendResponse.data.data;
       
-      // Send emails to each contact with rate limiting (max 2 requests per second)
-      for (let i = 0; i < contacts.length; i++) {
-        const contact = contacts[i];
-        
-        try {
-          // Send email via Resend API
-          const emailResponse = await campaignsAPI.sendEmail(
-            contact.email,
-            subjectLine,
-            htmlContent,
-            `${senderName} <noreply@fluffly.com>`
-          );
-          
-          if (emailResponse.data && emailResponse.data.id) {
-            // Track the sent email in our database
-            await campaignsAPI.trackSentEmail({
-              campaignId,
-              contactId: contact.id,
-              messageId: emailResponse.data.id,
-              contactEmail: contact.email
-            });
-            
-            // Update progress
-            setSendProgress(prev => ({ ...prev, sent: prev.sent + 1 }));
-          }
-        } catch (emailError) {
-          console.error(`Failed to send email to ${contact.email}:`, emailError);
-        }
-        
-        // Rate limit: wait 500ms between requests (2 requests per second)
-        if (i < contacts.length - 1) {
-          await delay(500);
-        }
-      }
-      
-      // Update campaign status to 'sent'
-      await campaignsAPI.update(campaignId, { status: 'sent' });
+      // Update progress
+      setSendProgress({ total: results.total, sent: results.sent });
       
       // Show success state
       setSendSuccess(true);
-      showSuccess('Campaign sent successfully!');
       
+      if (results.failed > 0) {
+        showError(`Campaign sent with some failures: ${results.sent}/${results.total} emails delivered. Check console for details.`);
+        console.warn('Failed emails:', results.errors);
+      } else {
+        showSuccess(`Campaign sent successfully! ${results.sent} emails delivered.`);
+      }
+        
       // Navigate back to campaigns after a delay
       setTimeout(() => {
         navigate('/campaigns');
       }, 2000);
     } catch (error: any) {
       console.error('Error sending campaign:', error);
-      showError(error.response?.data?.message || 'Failed to send campaign');
+      showError(error.response?.data?.message || error.message || 'Failed to send campaign');
     } finally {
       setIsSending(false);
     }
@@ -531,11 +534,17 @@ const CampaignEditor = () => {
                   onChange={(e) => setRecipientGroup(e.target.value)}
                 >
                   <option value="">Select a recipient group</option>
-                  {recipientGroups.map(group => (
-                    <option key={group.id} value={group.id}>
-                      {group.name} ({group.count} contacts)
-                    </option>
-                  ))}
+                  {groupsLoading ? (
+                    <option disabled>Loading groups...</option>
+                  ) : recipientGroups.length === 0 ? (
+                    <option disabled>No groups found</option>
+                  ) : (
+                    recipientGroups.map(group => (
+                      <option key={group.id} value={group.name}>
+                        {group.name} ({group.count || 0} contacts)
+                      </option>
+                    ))
+                  )}
                 </select>
                 <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
                   <UserGroupIcon className="h-5 w-5 text-gray-400" />
