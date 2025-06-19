@@ -8,7 +8,9 @@
     "build": "vite build",
     "build:type-check": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "start:backend": "cd fluffly-backend && node basic-server-prisma.js",
+    "start:all": "start-all.bat"
   },
   "dependencies": {
     "@heroicons/react": "^2.2.0",

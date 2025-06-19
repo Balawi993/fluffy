@@ -288,29 +288,43 @@ const Contacts = () => {
     if (lines.length === 0) return [];
 
     // Assume first line is header
-    const headers = lines[0].toLowerCase().split(',').map(h => h.trim());
+    const headers = lines[0].toLowerCase().split(',').map(h => h.trim().replace(/"/g, ''));
     const nameIndex = headers.findIndex(h => h.includes('name'));
-    const emailIndex = headers.findIndex(h => h.includes('email'));
-    const tagsIndex = headers.findIndex(h => h.includes('tag'));
+    const emailIndex = headers.findIndex(h => h.includes('email') || h.includes('mail'));
+    const tagsIndex = headers.findIndex(h => h.includes('tag') || h.includes('label'));
 
     if (nameIndex === -1 || emailIndex === -1) {
-      throw new Error('CSV must contain "name" and "email" columns');
+      throw new Error('CSV must contain "name" and "email" columns. Found headers: ' + headers.join(', '));
     }
 
     const contacts = [];
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    
     for (let i = 1; i < lines.length; i++) {
-      const values = lines[i].split(',').map(v => v.trim().replace(/"/g, ''));
-      if (values.length > Math.max(nameIndex, emailIndex)) {
-        const contact: { name: string; email: string; tags?: string } = {
-          name: values[nameIndex],
-          email: values[emailIndex]
-        };
-        if (tagsIndex !== -1 && values[tagsIndex]) {
-          contact.tags = values[tagsIndex];
+      try {
+        // Handle CSV with quoted fields
+        const values = lines[i].split(',').map(v => v.trim().replace(/^"|"$/g, ''));
+        
+        if (values.length > Math.max(nameIndex, emailIndex)) {
+          const name = values[nameIndex]?.trim();
+          const email = values[emailIndex]?.trim();
+          
+          // Validate email format
+          if (name && email && emailRegex.test(email)) {
+            const contact: { name: string; email: string; tags?: string } = {
+              name,
+              email: email.toLowerCase() // Normalize email
+            };
+            
+            if (tagsIndex !== -1 && values[tagsIndex]?.trim()) {
+              contact.tags = values[tagsIndex].trim();
+            }
+            
+            contacts.push(contact);
+          }
         }
-        if (contact.name && contact.email) {
-          contacts.push(contact);
-        }
+      } catch (error) {
+        console.warn(`Skipping invalid row ${i + 1}:`, lines[i]);
       }
     }
 
@@ -358,10 +372,11 @@ const Contacts = () => {
 
       if (results.failed > 0) {
         console.warn('Import errors:', results.errors);
+        const errorSummary = results.errors.slice(0, 3).join('; ') + (results.errors.length > 3 ? '...' : '');
         if (results.success === 0) {
-          showError('Failed to import any contacts. Check console for details.');
+          showError(`Failed to import any contacts. Errors: ${errorSummary}`);
         } else {
-          showError(`${results.failed} contacts failed to import. Check console for details.`);
+          showError(`${results.failed} contacts failed to import. Errors: ${errorSummary}`);
         }
       }
 
@@ -671,9 +686,28 @@ const Contacts = () => {
                     className="w-full px-3 py-2 border rounded-md file:mr-3 file:py-1 file:px-2 file:rounded file:border-0 file:text-sm file:bg-gray-50"
                     disabled={importing}
                   />
-                  <p className="text-xs text-gray-500 mt-1">
-                    CSV should have columns: name, email, tags (optional)
-                  </p>
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-gray-500 mt-1">
+                      CSV should have columns: name, email, tags (optional)
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const csvContent = 'name,email,tags\nJohn Doe,john@example.com,customer\nJane Smith,jane@example.com,lead';
+                        const blob = new Blob([csvContent], { type: 'text/csv' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = 'sample-contacts.csv';
+                        a.click();
+                        URL.revokeObjectURL(url);
+                      }}
+                      className="text-xs text-blue-600 hover:text-blue-800 underline"
+                      disabled={importing}
+                    >
+                      Download Sample
+                    </button>
+                  </div>
                 </div>
                 
                 <div>

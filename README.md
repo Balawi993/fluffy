@@ -46,7 +46,7 @@ fluffly/
 ### Prerequisites
 - Node.js (v16 or higher)
 - npm or yarn
-- PostgreSQL database
+- Supabase account (database already configured)
 
 ### Frontend Setup
 
@@ -92,24 +92,50 @@ fluffly/
    cp .env.example .env
    ```
 
-4. Update the database connection string in `.env`
-
-5. Generate Prisma client
-   ```bash
-   npx prisma generate
+4. The database is already configured with Supabase PostgreSQL. The `.env` file should contain:
+   ```
+   DATABASE_URL="postgresql://postgres.xeoaqmawlxxcgeisjhfo:PQTmUFF5ll7CaVkh@aws-0-us-east-2.pooler.supabase.com:5432/postgres"
+   JWT_SECRET="your-super-secret-jwt-key-change-this-in-production-fluffly-2024"
+   JWT_EXPIRES_IN="7d"
+   PORT=5000
+   NODE_ENV=development
+   FRONTEND_URL="http://localhost:5173"
+   RESEND_API_KEY="your-resend-api-key"
+   RESEND_WEBHOOK_SECRET="your-webhook-signing-secret"
    ```
 
-6. Push schema to database
-   ```bash
-   npx prisma db push
-   ```
+5. The Prisma schema is already synchronized with the database
 
-7. Start the server
+6. Start the server
    ```bash
    node basic-server-prisma.js
    # or use the batch file from the root directory
    ./start-backend.bat
    ```
+
+## Database Status
+
+### Current Database Configuration
+- **Provider**: Supabase PostgreSQL
+- **Status**: ✅ Connected and Working
+- **Schema**: Synchronized with Prisma models
+- **Connection**: Stable and tested
+
+### Database Models
+- **User**: User accounts with authentication
+- **Contact**: Email contacts with groups and tags
+- **Template**: Email templates with block-based content
+- **Campaign**: Email campaigns with tracking
+- **SentEmail**: Track sent emails with status
+- **EmailEvent**: Track email events (opens, clicks, bounces, etc.)
+- **Group**: Contact groups for organization
+
+### Test Data Available
+The database contains sample data for testing:
+- Test users with authentication
+- Sample contacts and groups
+- Email templates
+- Campaign examples
 
 ## Environment Variables
 
@@ -122,8 +148,8 @@ VITE_APP_DESCRIPTION="Modern Email Marketing Platform"
 
 ### Backend (.env)
 ```
-DATABASE_URL="postgresql://username:password@localhost:5432/fluffly_db?schema=public"
-JWT_SECRET="your-super-secret-jwt-key-change-this-in-production"
+DATABASE_URL="postgresql://postgres.xeoaqmawlxxcgeisjhfo:PQTmUFF5ll7CaVkh@aws-0-us-east-2.pooler.supabase.com:5432/postgres"
+JWT_SECRET="your-super-secret-jwt-key-change-this-in-production-fluffly-2024"
 JWT_EXPIRES_IN="7d"
 PORT=5000
 NODE_ENV=development

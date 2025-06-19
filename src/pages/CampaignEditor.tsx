@@ -324,10 +324,9 @@ const CampaignEditor = () => {
     }
 
     setIsSending(true);
-    setSendProgress({ total: 0, sent: 0 });
     
     try {
-      // Create the campaign first
+      // Create the campaign
       const campaignData = {
         name: campaignName.trim(),
         subject: subjectLine.trim(),
@@ -343,38 +342,73 @@ const CampaignEditor = () => {
         throw new Error('Failed to create campaign');
       }
       
-      const campaign = campaignResponse.data.data.data;
-      const campaignId = campaign.id;
+      const campaignId = campaignResponse.data.data.id;
       
-      // Send the campaign using our new endpoint
-      const sendResponse = await campaignsAPI.send(campaignId);
+      // Convert email blocks to HTML
+      const htmlContent = convertBlocksToHTML(canvasBlocks);
       
-      if (!sendResponse.data.success) {
-        throw new Error(sendResponse.data.message || 'Failed to send campaign');
+      // Fetch contacts based on the selected group
+      const contactsResponse = await contactsAPI.getAll({ group: recipientGroup });
+      const contacts = contactsResponse.data?.data || [];
+      
+      if (contacts.length === 0) {
+        showError('No contacts found in the selected group');
+        setIsSending(false);
+        return;
       }
       
-      const results = sendResponse.data.data;
+      // Update progress state
+      setSendProgress({ total: contacts.length, sent: 0 });
       
-      // Update progress
-      setSendProgress({ total: results.total, sent: results.sent });
+      // Send emails to each contact with rate limiting (max 2 requests per second)
+      for (let i = 0; i < contacts.length; i++) {
+        const contact = contacts[i];
+        
+        try {
+          // Send email via Resend API
+          const emailResponse = await campaignsAPI.sendEmail(
+            contact.email,
+            subjectLine,
+            htmlContent,
+            `${senderName} <noreply@fluffly.com>`
+          );
+          
+          if (emailResponse.data && emailResponse.data.id) {
+            // Track the sent email in our database
+            await campaignsAPI.trackSentEmail({
+              campaignId,
+              contactId: contact.id,
+              messageId: emailResponse.data.id,
+              contactEmail: contact.email
+            });
+            
+            // Update progress
+            setSendProgress(prev => ({ ...prev, sent: prev.sent + 1 }));
+          }
+        } catch (emailError) {
+          console.error(`Failed to send email to ${contact.email}:`, emailError);
+        }
+        
+        // Rate limit: wait 500ms between requests (2 requests per second)
+        if (i < contacts.length - 1) {
+          await delay(500);
+        }
+      }
+      
+      // Update campaign status to 'sent'
+      await campaignsAPI.update(campaignId, { status: 'sent' });
       
       // Show success state
-      setSendSuccess(true);
-      
-      if (results.failed > 0) {
-        showError(`Campaign sent with some failures: ${results.sent}/${results.total} emails delivered. Check console for details.`);
-        console.warn('Failed emails:', results.errors);
-      } else {
-        showSuccess(`Campaign sent successfully! ${results.sent} emails delivered.`);
-      }
+        setSendSuccess(true);
+      showSuccess('Campaign sent successfully!');
         
-      // Navigate back to campaigns after a delay
-      setTimeout(() => {
-        navigate('/campaigns');
-      }, 2000);
+        // Navigate back to campaigns after a delay
+        setTimeout(() => {
+          navigate('/campaigns');
+        }, 2000);
     } catch (error: any) {
       console.error('Error sending campaign:', error);
-      showError(error.response?.data?.message || error.message || 'Failed to send campaign');
+      showError(error.response?.data?.message || 'Failed to send campaign');
     } finally {
       setIsSending(false);
     }
@@ -534,17 +568,11 @@ const CampaignEditor = () => {
                   onChange={(e) => setRecipientGroup(e.target.value)}
                 >
                   <option value="">Select a recipient group</option>
-                  {groupsLoading ? (
-                    <option disabled>Loading groups...</option>
-                  ) : recipientGroups.length === 0 ? (
-                    <option disabled>No groups found</option>
-                  ) : (
-                    recipientGroups.map(group => (
-                      <option key={group.id} value={group.name}>
-                        {group.name} ({group.count || 0} contacts)
-                      </option>
-                    ))
-                  )}
+                  {recipientGroups.map(group => (
+                    <option key={group.id} value={group.id}>
+                      {group.name} ({group.count} contacts)
+                    </option>
+                  ))}
                 </select>
                 <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
                   <UserGroupIcon className="h-5 w-5 text-gray-400" />
