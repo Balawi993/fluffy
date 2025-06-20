@@ -2014,6 +2014,164 @@ const server = http.createServer(async (req, res) => {
     }
 
     // =========================
+    // USER PROFILE ENDPOINTS
+    // =========================
+
+    // Update user profile
+    if (path === '/api/user' && method === 'PUT') {
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        sendJSON(res, 401, {
+          success: false,
+          message: 'Access token required'
+        }, origin);
+        return;
+      }
+
+      const token = authHeader.substring(7);
+      const decoded = verifyToken(token);
+      
+      if (!decoded) {
+        sendJSON(res, 401, {
+          success: false,
+          message: 'Invalid token'
+        }, origin);
+        return;
+      }
+
+      try {
+        const body = await parseBody(req);
+        const { fullName } = body;
+
+        if (!fullName || !fullName.trim()) {
+          sendJSON(res, 400, {
+            success: false,
+            message: 'Full name is required'
+          }, origin);
+          return;
+        }
+
+        const updatedUser = await prisma.user.update({
+          where: { id: decoded.userId },
+          data: { fullName: fullName.trim() },
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            createdAt: true
+          }
+        });
+
+        sendJSON(res, 200, {
+          success: true,
+          message: 'Profile updated successfully',
+          data: {
+            user: updatedUser
+          }
+        }, origin);
+        return;
+      } catch (error) {
+        console.error('Update user error:', error);
+        sendJSON(res, 500, {
+          success: false,
+          message: 'Internal server error'
+        }, origin);
+        return;
+      }
+    }
+
+    // Change password
+    if (path === '/api/user/change-password' && method === 'POST') {
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        sendJSON(res, 401, {
+          success: false,
+          message: 'Access token required'
+        }, origin);
+        return;
+      }
+
+      const token = authHeader.substring(7);
+      const decoded = verifyToken(token);
+      
+      if (!decoded) {
+        sendJSON(res, 401, {
+          success: false,
+          message: 'Invalid token'
+        }, origin);
+        return;
+      }
+
+      try {
+        const body = await parseBody(req);
+        const { currentPassword, newPassword } = body;
+
+        if (!currentPassword || !newPassword) {
+          sendJSON(res, 400, {
+            success: false,
+            message: 'Current password and new password are required'
+          }, origin);
+          return;
+        }
+
+        if (newPassword.length < 6) {
+          sendJSON(res, 400, {
+            success: false,
+            message: 'New password must be at least 6 characters long'
+          }, origin);
+          return;
+        }
+
+        // Get user with current password
+        const user = await prisma.user.findUnique({
+          where: { id: decoded.userId }
+        });
+
+        if (!user) {
+          sendJSON(res, 404, {
+            success: false,
+            message: 'User not found'
+          }, origin);
+          return;
+        }
+
+        // Verify current password
+        const bcrypt = require('bcrypt');
+        const isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.password);
+
+        if (!isCurrentPasswordValid) {
+          sendJSON(res, 400, {
+            success: false,
+            message: 'Current password is incorrect'
+          }, origin);
+          return;
+        }
+
+        // Hash new password
+        const hashedNewPassword = await bcrypt.hash(newPassword, 10);
+
+        // Update password
+        await prisma.user.update({
+          where: { id: decoded.userId },
+          data: { password: hashedNewPassword }
+        });
+
+        sendJSON(res, 200, {
+          success: true,
+          message: 'Password changed successfully'
+        }, origin);
+        return;
+      } catch (error) {
+        console.error('Change password error:', error);
+        sendJSON(res, 500, {
+          success: false,
+          message: 'Internal server error'
+        }, origin);
+        return;
+      }
+    }
+
+    // =========================
     // NOT FOUND
     // =========================
     
@@ -2048,6 +2206,8 @@ async function startServer() {
       console.log('   - POST /api/auth/signup');
       console.log('   - POST /api/auth/login');
       console.log('   - GET  /api/auth/me');
+      console.log('   - PUT  /api/user');
+      console.log('   - POST /api/user/change-password');
       console.log('   - GET  /api/contacts');
       console.log('   - POST /api/contacts');
       console.log('   - PUT  /api/contacts/:id');

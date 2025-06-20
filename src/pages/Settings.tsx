@@ -2,12 +2,18 @@ import React, { useState, useEffect } from 'react';
 import { 
   UserCircleIcon,
   EnvelopeIcon,
-  InformationCircleIcon
+  InformationCircleIcon,
+  KeyIcon,
+  CheckIcon,
+  XMarkIcon
 } from '@heroicons/react/24/outline';
 import { authAPI } from '../lib/api';
+import { Toast } from '../components';
+import { useToast } from '../lib/useToast';
 
 interface UserInfo {
-  name: string;
+  id: string;
+  fullName: string;
   email: string;
 }
 
@@ -15,6 +21,17 @@ const Settings = () => {
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [fullName, setFullName] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
+  const [passwordData, setPasswordData] = useState({
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: ''
+  });
+  const [changingPassword, setChangingPassword] = useState(false);
+  const { toasts, showSuccess, showError, hideToast } = useToast();
 
   useEffect(() => {
     fetchUserInfo();
@@ -25,12 +42,105 @@ const Settings = () => {
       setLoading(true);
       setError(null);
       const response = await authAPI.me();
-      setUserInfo(response.data.user);
+      setUserInfo(response.data.data.user);
+      setFullName(response.data.data.user.fullName);
     } catch (err: any) {
       console.error('Error fetching user info:', err);
       setError('Failed to load user information');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleUpdateName = async () => {
+    if (!fullName.trim()) {
+      showError('Full name cannot be empty');
+      return;
+    }
+
+    try {
+      setSaving(true);
+      const response = await fetch('/api/user', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({ fullName: fullName.trim() })
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setUserInfo(prev => prev ? { ...prev, fullName: fullName.trim() } : null);
+        setIsEditingName(false);
+        showSuccess('Full name updated successfully');
+      } else {
+        showError(data.message || 'Failed to update full name');
+      }
+    } catch (error: any) {
+      console.error('Error updating name:', error);
+      showError('Failed to update full name');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setFullName(userInfo?.fullName || '');
+    setIsEditingName(false);
+  };
+
+  const handleChangePassword = async () => {
+    // Validation
+    if (!passwordData.currentPassword) {
+      showError('Current password is required');
+      return;
+    }
+
+    if (!passwordData.newPassword) {
+      showError('New password is required');
+      return;
+    }
+
+    if (passwordData.newPassword.length < 6) {
+      showError('New password must be at least 6 characters long');
+      return;
+    }
+
+    if (passwordData.newPassword !== passwordData.confirmPassword) {
+      showError('New password and confirmation do not match');
+      return;
+    }
+
+    try {
+      setChangingPassword(true);
+      const response = await fetch('/api/user/change-password', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({
+          currentPassword: passwordData.currentPassword,
+          newPassword: passwordData.newPassword
+        })
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setIsPasswordModalOpen(false);
+        setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
+        showSuccess('Password changed successfully');
+      } else {
+        showError(data.message || 'Failed to change password');
+      }
+    } catch (error: any) {
+      console.error('Error changing password:', error);
+      showError('Failed to change password');
+    } finally {
+      setChangingPassword(false);
     }
   };
 
@@ -85,14 +195,51 @@ const Settings = () => {
             <label htmlFor="fullName" className="form-label">
               Full Name
             </label>
-            <input
-              type="text"
-              id="fullName"
-              className="input bg-gray-50 cursor-not-allowed"
-              value={userInfo?.name || ''}
-              disabled
-              readOnly
-            />
+            {isEditingName ? (
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  id="fullName"
+                  className="input flex-1"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  placeholder="Enter your full name"
+                />
+                <button
+                  onClick={handleUpdateName}
+                  disabled={saving}
+                  className="btn-primary px-4 py-2 flex items-center"
+                >
+                  {saving ? (
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                  ) : (
+                    <CheckIcon className="w-4 h-4" />
+                  )}
+                </button>
+                <button
+                  onClick={handleCancelEdit}
+                  disabled={saving}
+                  className="btn-secondary px-4 py-2"
+                >
+                  <XMarkIcon className="w-4 h-4" />
+                </button>
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  className="input flex-1 bg-gray-50 cursor-not-allowed"
+                  value={userInfo?.fullName || ''}
+                  readOnly
+                />
+                <button
+                  onClick={() => setIsEditingName(true)}
+                  className="btn-secondary px-4 py-2"
+                >
+                  Edit
+                </button>
+              </div>
+            )}
             <p className="form-hint">
               Your full name as it appears on your account
             </p>
@@ -112,6 +259,30 @@ const Settings = () => {
             />
             <p className="form-hint">
               Your account email address used for login and notifications
+            </p>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">
+              Password
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="password"
+                className="input flex-1 bg-gray-50 cursor-not-allowed"
+                value="••••••••"
+                readOnly
+              />
+              <button
+                onClick={() => setIsPasswordModalOpen(true)}
+                className="btn-secondary px-4 py-2 flex items-center gap-2"
+              >
+                <KeyIcon className="w-4 h-4" />
+                Change Password
+              </button>
+            </div>
+            <p className="form-hint">
+              Click "Change Password" to update your account password
             </p>
           </div>
         </div>
@@ -154,16 +325,91 @@ const Settings = () => {
         </div>
       </div>
 
-      {/* Additional Settings Placeholder */}
-      <div className="card">
-        <h2 className="text-xl font-semibold mb-4">More Settings</h2>
-        <div className="bg-light/50 border-2 border-dashed border-dark/20 rounded-lg p-8 text-center">
-          <p className="text-gray-500 mb-2">Additional settings will be available here</p>
-          <p className="text-sm text-gray-400">
-            Features like notifications, integrations, and billing settings coming soon
-          </p>
+      {/* Change Password Modal */}
+      {isPasswordModalOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-lg font-semibold">Change Password</h3>
+              <button
+                onClick={() => setIsPasswordModalOpen(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <XMarkIcon className="w-6 h-6" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="form-group">
+                <label className="form-label">Current Password</label>
+                <input
+                  type="password"
+                  className="input"
+                  value={passwordData.currentPassword}
+                  onChange={(e) => setPasswordData(prev => ({ ...prev, currentPassword: e.target.value }))}
+                  placeholder="Enter current password"
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">New Password</label>
+                <input
+                  type="password"
+                  className="input"
+                  value={passwordData.newPassword}
+                  onChange={(e) => setPasswordData(prev => ({ ...prev, newPassword: e.target.value }))}
+                  placeholder="Enter new password (min 6 characters)"
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Confirm New Password</label>
+                <input
+                  type="password"
+                  className="input"
+                  value={passwordData.confirmPassword}
+                  onChange={(e) => setPasswordData(prev => ({ ...prev, confirmPassword: e.target.value }))}
+                  placeholder="Confirm new password"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={handleChangePassword}
+                disabled={changingPassword}
+                className="btn-primary flex-1 py-2 flex items-center justify-center"
+              >
+                {changingPassword ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                    Changing...
+                  </>
+                ) : (
+                  'Change Password'
+                )}
+              </button>
+              <button
+                onClick={() => setIsPasswordModalOpen(false)}
+                disabled={changingPassword}
+                className="btn-secondary flex-1 py-2"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* Toast Notifications */}
+      {toasts.map((toast) => (
+        <Toast
+          key={toast.id}
+          message={toast.message}
+          type={toast.type}
+          onClose={() => hideToast(toast.id)}
+        />
+      ))}
     </div>
   );
 };
