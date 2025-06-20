@@ -163,7 +163,7 @@
   }
 
   .action-button-analytics {
-    @apply action-button text-blue-600 hover:text-blue-800 hover:bg-blue-50 relative group disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply action-button text-blue-600 hover:text-blue-800 hover:bg-blue-50 relative disabled:opacity-50 disabled:cursor-not-allowed;
   }
 
   .action-button-delete {

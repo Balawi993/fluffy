@@ -68,7 +68,7 @@ const CampaignRow: React.FC<CampaignRowProps> = ({
         <div className="flex items-center space-x-2">
           {canShowAnalytics(campaign as any) && (
             <button 
-              className="action-button-analytics"
+              className="action-button-analytics group"
               onClick={handleViewAnalytics}
               disabled={isNavigating}
               title="View detailed campaign analytics and performance metrics"
