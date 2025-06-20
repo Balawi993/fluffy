@@ -1081,8 +1081,20 @@ const server = http.createServer(async (req, res) => {
       }
 
       try {
+        // Parse query parameters
+        const url = new URL(req.url, `http://${req.headers.host}`);
+        const statusFilter = url.searchParams.get('status');
+        
+        // Build where clause
+        let whereClause = { userId: decoded.userId };
+        
+        // Add status filter if provided
+        if (statusFilter) {
+          whereClause.status = statusFilter;
+        }
+        
         const campaigns = await prisma.campaign.findMany({
-          where: { userId: decoded.userId },
+          where: whereClause,
           orderBy: { createdAt: 'desc' }
         });
 
