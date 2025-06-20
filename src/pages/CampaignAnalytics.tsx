@@ -16,25 +16,22 @@ interface Campaign {
   name: string;
   subject: string;
   sender: string;
-  group: string;
+  group: {
+    id: string;
+    name: string;
+  };
   status: string;
   createdAt: string;
 }
 
-interface SentEmail {
-  id: string;
-  messageId: string;
-  contactEmail: string;
-  status: string;
-  createdAt: string;
-}
-
-interface EmailEvent {
-  id: string;
-  eventType: string;
-  contactEmail: string;
-  timestamp: string;
-  metadata?: any;
+interface AnalyticsData {
+  totalSent: number;
+  delivered: number;
+  opened: number;
+  clicked: number;
+  bounced: number;
+  complained: number;
+  message?: string;
 }
 
 const CampaignAnalytics: React.FC = () => {
@@ -43,9 +40,9 @@ const CampaignAnalytics: React.FC = () => {
   const { showError } = useToast();
   
   const [campaign, setCampaign] = useState<Campaign | null>(null);
-  const [sentEmails, setSentEmails] = useState<SentEmail[]>([]);
-  const [emailEvents, setEmailEvents] = useState<EmailEvent[]>([]);
+  const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [analyticsLoading, setAnalyticsLoading] = useState(true);
 
   useEffect(() => {
     if (id) {
@@ -57,60 +54,26 @@ const CampaignAnalytics: React.FC = () => {
     try {
       setLoading(true);
       
-      // For now, we'll show a placeholder since we need to implement these endpoints
-      // In a real implementation, you'd fetch:
-      // - Campaign details
-      // - Sent emails for this campaign
-      // - Email events for this campaign
-      
-      // Placeholder data
-      setCampaign({
-        id: id!,
-        name: 'Sample Campaign',
-        subject: 'Welcome to Fluffly!',
-        sender: 'Team Fluffly',
-        group: 'Newsletter Subscribers',
-        status: 'sent',
-        createdAt: new Date().toISOString()
-      });
-      
-      setSentEmails([
-        {
-          id: '1',
-          messageId: 'msg_123',
-          contactEmail: 'user1@example.com',
-          status: 'delivered',
-          createdAt: new Date().toISOString()
-        },
-        {
-          id: '2',
-          messageId: 'msg_124',
-          contactEmail: 'user2@example.com',
-          status: 'opened',
-          createdAt: new Date().toISOString()
-        }
+      // Fetch campaign details and analytics in parallel
+      const [campaignResponse, analyticsResponse] = await Promise.all([
+        campaignsAPI.getById(id!),
+        campaignsAPI.getAnalytics(id!)
       ]);
       
-      setEmailEvents([
-        {
-          id: '1',
-          eventType: 'delivered',
-          contactEmail: 'user1@example.com',
-          timestamp: new Date().toISOString()
-        },
-        {
-          id: '2',
-          eventType: 'opened',
-          contactEmail: 'user2@example.com',
-          timestamp: new Date().toISOString()
-        }
-      ]);
+      // Set campaign data
+      const campaignData = campaignResponse.data.data?.data || campaignResponse.data.data;
+      setCampaign(campaignData);
+      
+      // Set analytics data
+      const analyticsData = analyticsResponse.data.data;
+      setAnalytics(analyticsData);
       
     } catch (error: any) {
       console.error('Error fetching campaign data:', error);
       showError('Failed to load campaign analytics');
     } finally {
       setLoading(false);
+      setAnalyticsLoading(false);
     }
   };
 
@@ -164,16 +127,21 @@ const CampaignAnalytics: React.FC = () => {
     );
   }
 
-  // Calculate statistics
-  const totalSent = sentEmails.length;
-  const totalDelivered = sentEmails.filter(email => ['delivered', 'opened', 'clicked'].includes(email.status)).length;
-  const totalOpened = emailEvents.filter(event => event.eventType === 'opened').length;
-  const totalClicked = emailEvents.filter(event => event.eventType === 'clicked').length;
-  const totalBounced = emailEvents.filter(event => event.eventType === 'bounced').length;
+  // Calculate statistics from real analytics data
+  const totalSent = analytics?.totalSent || 0;
+  const totalDelivered = analytics?.delivered || 0;
+  const totalOpened = analytics?.opened || 0;
+  const totalClicked = analytics?.clicked || 0;
+  const totalBounced = analytics?.bounced || 0;
+  const totalComplained = analytics?.complained || 0;
 
   const deliveryRate = totalSent > 0 ? ((totalDelivered / totalSent) * 100).toFixed(1) : '0';
   const openRate = totalSent > 0 ? ((totalOpened / totalSent) * 100).toFixed(1) : '0';
   const clickRate = totalSent > 0 ? ((totalClicked / totalSent) * 100).toFixed(1) : '0';
+
+  // Check if we have analytics data or if campaign hasn't been sent
+  const hasAnalyticsData = analytics && totalSent > 0;
+  const showEmptyState = campaign.status !== 'sent' || (analytics?.message && analytics.message.includes('not been sent'));
 
   return (
     <div className="space-y-8">
@@ -214,7 +182,7 @@ const CampaignAnalytics: React.FC = () => {
           </div>
           <div>
             <p className="text-sm text-gray-500">Target Group</p>
-            <p className="font-medium">{campaign.group}</p>
+            <p className="font-medium">{campaign.group.name}</p>
           </div>
           <div>
             <p className="text-sm text-gray-500">Sent Date</p>
@@ -224,89 +192,117 @@ const CampaignAnalytics: React.FC = () => {
       </div>
 
       {/* Statistics Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <div className="bg-white rounded-lg border border-gray-200 p-6">
-          <div className="flex items-center">
-            <div className="flex-shrink-0">
-              <EnvelopeIcon className="w-8 h-8 text-blue-600" />
-            </div>
-            <div className="ml-4">
-              <p className="text-sm font-medium text-gray-500">Total Sent</p>
-              <p className="text-2xl font-bold text-gray-900">{totalSent}</p>
-            </div>
-          </div>
+      {showEmptyState ? (
+        <div className="bg-white rounded-lg border border-gray-200 p-12 text-center">
+          <EnvelopeIcon className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+          <h3 className="text-lg font-medium text-gray-900 mb-2">No data yet</h3>
+          <p className="text-gray-600">
+            {campaign.status !== 'sent' 
+              ? 'This campaign has not been sent yet. Send the campaign to see analytics data.'
+              : 'Waiting for email activity. Analytics will appear once emails are sent and events are tracked.'
+            }
+          </p>
         </div>
-
-        <div className="bg-white rounded-lg border border-gray-200 p-6">
-          <div className="flex items-center">
-            <div className="flex-shrink-0">
-              <EnvelopeIcon className="w-8 h-8 text-green-600" />
-            </div>
-            <div className="ml-4">
-              <p className="text-sm font-medium text-gray-500">Delivered</p>
-              <p className="text-2xl font-bold text-gray-900">{totalDelivered}</p>
-              <p className="text-sm text-green-600">{deliveryRate}% delivery rate</p>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-lg border border-gray-200 p-6">
-          <div className="flex items-center">
-            <div className="flex-shrink-0">
-              <EyeIcon className="w-8 h-8 text-purple-600" />
-            </div>
-            <div className="ml-4">
-              <p className="text-sm font-medium text-gray-500">Opened</p>
-              <p className="text-2xl font-bold text-gray-900">{totalOpened}</p>
-              <p className="text-sm text-purple-600">{openRate}% open rate</p>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-lg border border-gray-200 p-6">
-          <div className="flex items-center">
-            <div className="flex-shrink-0">
-              <CursorArrowRaysIcon className="w-8 h-8 text-orange-600" />
-            </div>
-            <div className="ml-4">
-              <p className="text-sm font-medium text-gray-500">Clicked</p>
-              <p className="text-2xl font-bold text-gray-900">{totalClicked}</p>
-              <p className="text-sm text-orange-600">{clickRate}% click rate</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Recent Events */}
-      <div className="bg-white rounded-lg border border-gray-200">
-        <div className="px-6 py-4 border-b border-gray-200">
-          <h2 className="text-lg font-semibold">Recent Email Events</h2>
-        </div>
-        <div className="divide-y divide-gray-200">
-          {emailEvents.length > 0 ? (
-            emailEvents.slice(0, 10).map((event) => (
-              <div key={event.id} className="px-6 py-4 flex items-center space-x-4">
-                <div className={`flex-shrink-0 p-2 rounded-full ${getStatusColor(event.eventType)}`}>
-                  {getEventIcon(event.eventType)}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-900">
-                    {event.eventType.charAt(0).toUpperCase() + event.eventType.slice(1)}
-                  </p>
-                  <p className="text-sm text-gray-500">{event.contactEmail}</p>
-                </div>
-                <div className="text-sm text-gray-500">
-                  {new Date(event.timestamp).toLocaleString()}
+      ) : analyticsLoading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="bg-white rounded-lg border border-gray-200 p-6">
+              <div className="animate-pulse">
+                <div className="flex items-center">
+                  <div className="w-8 h-8 bg-gray-200 rounded"></div>
+                  <div className="ml-4 flex-1">
+                    <div className="h-4 bg-gray-200 rounded w-20 mb-2"></div>
+                    <div className="h-8 bg-gray-200 rounded w-12 mb-1"></div>
+                    <div className="h-3 bg-gray-200 rounded w-16"></div>
+                  </div>
                 </div>
               </div>
-            ))
-          ) : (
-            <div className="px-6 py-8 text-center">
-              <p className="text-gray-500">No email events recorded yet.</p>
             </div>
+          ))}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div className="bg-white rounded-lg border border-gray-200 p-6">
+            <div className="flex items-center">
+              <div className="flex-shrink-0">
+                <EnvelopeIcon className="w-8 h-8 text-blue-600" />
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-500">Total Sent</p>
+                <p className="text-2xl font-bold text-gray-900">{totalSent.toLocaleString()}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-lg border border-gray-200 p-6">
+            <div className="flex items-center">
+              <div className="flex-shrink-0">
+                <EnvelopeIcon className="w-8 h-8 text-green-600" />
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-500">Delivered</p>
+                <p className="text-2xl font-bold text-gray-900">{totalDelivered.toLocaleString()}</p>
+                <p className="text-sm text-green-600">{deliveryRate}% delivery rate</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-lg border border-gray-200 p-6">
+            <div className="flex items-center">
+              <div className="flex-shrink-0">
+                <EyeIcon className="w-8 h-8 text-purple-600" />
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-500">Opened</p>
+                <p className="text-2xl font-bold text-gray-900">{totalOpened.toLocaleString()}</p>
+                <p className="text-sm text-purple-600">{openRate}% open rate</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-lg border border-gray-200 p-6">
+            <div className="flex items-center">
+              <div className="flex-shrink-0">
+                <CursorArrowRaysIcon className="w-8 h-8 text-orange-600" />
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-500">Clicked</p>
+                <p className="text-2xl font-bold text-gray-900">{totalClicked.toLocaleString()}</p>
+                <p className="text-sm text-orange-600">{clickRate}% click rate</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Additional stats for bounced and complained */}
+          {(totalBounced > 0 || totalComplained > 0) && (
+            <>
+              <div className="bg-white rounded-lg border border-gray-200 p-6">
+                <div className="flex items-center">
+                  <div className="flex-shrink-0">
+                    <ExclamationTriangleIcon className="w-8 h-8 text-red-600" />
+                  </div>
+                  <div className="ml-4">
+                    <p className="text-sm font-medium text-gray-500">Bounced</p>
+                    <p className="text-2xl font-bold text-gray-900">{totalBounced.toLocaleString()}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-lg border border-gray-200 p-6">
+                <div className="flex items-center">
+                  <div className="flex-shrink-0">
+                    <ExclamationTriangleIcon className="w-8 h-8 text-gray-600" />
+                  </div>
+                  <div className="ml-4">
+                    <p className="text-sm font-medium text-gray-500">Complained</p>
+                    <p className="text-2xl font-bold text-gray-900">{totalComplained.toLocaleString()}</p>
+                  </div>
+                </div>
+              </div>
+            </>
           )}
         </div>
-      </div>
+      )}
     </div>
   );
 };

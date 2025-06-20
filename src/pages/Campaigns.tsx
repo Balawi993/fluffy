@@ -64,6 +64,8 @@ const Campaigns = () => {
       // Add UI properties for display
       const campaignsWithUI = campaignsData.map((campaign: any) => ({
         ...campaign,
+        // Fix group display - use group.name if available, otherwise fallback to group field or "No group"
+        group: campaign.group?.name || campaign.group || 'No group',
         created: campaign.createdAt ? new Date(campaign.createdAt).toLocaleDateString() : 'Unknown',
         lastSent: campaign.status === 'sent' 
           ? (campaign.updatedAt ? new Date(campaign.updatedAt).toLocaleDateString() : 'Unknown')

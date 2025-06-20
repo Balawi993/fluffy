@@ -1086,15 +1086,90 @@ const server = http.createServer(async (req, res) => {
           orderBy: { createdAt: 'desc' }
         });
 
+        // Transform campaigns to include group name info
+        const campaignsWithGroups = campaigns.map(campaign => ({
+          ...campaign,
+          group: {
+            id: campaign.groupId || campaign.group, // Use groupId if available, fallback to group field
+            name: campaign.group // The group field now contains the actual group name
+          }
+        }));
+
         sendJSON(res, 200, {
           success: true,
           data: {
-            data: campaigns
+            data: campaignsWithGroups
           }
         }, origin);
         return;
       } catch (error) {
         console.error('Get campaigns error:', error);
+        sendJSON(res, 500, {
+          success: false,
+          message: 'Internal server error'
+        }, origin);
+        return;
+      }
+    }
+
+    // Get individual campaign
+    if (path.startsWith('/api/campaigns/') && path.split('/').length === 4 && method === 'GET') {
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        sendJSON(res, 401, {
+          success: false,
+          message: 'Access token required'
+        }, origin);
+        return;
+      }
+
+      const token = authHeader.substring(7);
+      const decoded = verifyToken(token);
+      
+      if (!decoded) {
+        sendJSON(res, 401, {
+          success: false,
+          message: 'Invalid token'
+        }, origin);
+        return;
+      }
+
+      const campaignId = path.split('/')[3];
+
+      try {
+        const campaign = await prisma.campaign.findFirst({
+          where: { 
+            id: campaignId,
+            userId: decoded.userId 
+          }
+        });
+
+        if (!campaign) {
+          sendJSON(res, 404, {
+            success: false,
+            message: 'Campaign not found'
+          }, origin);
+          return;
+        }
+
+        // Transform campaign to include group info
+        const campaignWithGroup = {
+          ...campaign,
+          group: {
+            id: campaign.groupId || campaign.group, // Use groupId if available, fallback to group field
+            name: campaign.group // The group field now contains the actual group name
+          }
+        };
+
+        sendJSON(res, 200, {
+          success: true,
+          data: {
+            data: campaignWithGroup
+          }
+        }, origin);
+        return;
+      } catch (error) {
+        console.error('Get campaign error:', error);
         sendJSON(res, 500, {
           success: false,
           message: 'Internal server error'
@@ -1138,12 +1213,43 @@ const server = http.createServer(async (req, res) => {
       }
 
       try {
+        // Find group by name to get both name and ID
+        let groupName = group;
+        let groupId = null;
+        
+        // Try to find the group by name first
+        const foundGroup = await prisma.group.findFirst({
+          where: {
+            name: group,
+            userId: decoded.userId
+          }
+        });
+        
+        if (foundGroup) {
+          groupName = foundGroup.name;
+          groupId = foundGroup.id;
+        } else {
+          // If group is passed as UUID, try to find by ID
+          const foundGroupById = await prisma.group.findFirst({
+            where: {
+              id: group,
+              userId: decoded.userId
+            }
+          });
+          
+          if (foundGroupById) {
+            groupName = foundGroupById.name;
+            groupId = foundGroupById.id;
+          }
+        }
+
         const campaign = await prisma.campaign.create({
           data: {
             name,
             subject,
             sender,
-            group,
+            group: groupName, // Store the group name for display
+            groupId: groupId, // Store the group ID for relations
             blocks,
             userId: decoded.userId
           }
@@ -1219,22 +1325,62 @@ const server = http.createServer(async (req, res) => {
           return;
         }
 
+        // Find group by name to get both name and ID
+        let groupName = group;
+        let groupId = null;
+        
+        // Try to find the group by name first
+        const foundGroup = await prisma.group.findFirst({
+          where: {
+            name: group,
+            userId: decoded.userId
+          }
+        });
+        
+        if (foundGroup) {
+          groupName = foundGroup.name;
+          groupId = foundGroup.id;
+        } else {
+          // If group is passed as UUID, try to find by ID
+          const foundGroupById = await prisma.group.findFirst({
+            where: {
+              id: group,
+              userId: decoded.userId
+            }
+          });
+          
+          if (foundGroupById) {
+            groupName = foundGroupById.name;
+            groupId = foundGroupById.id;
+          }
+        }
+
         const campaign = await prisma.campaign.update({
           where: { id: campaignId },
           data: {
             name,
             subject,
             sender,
-            group,
+            group: groupName, // Store the group name for display
+            groupId: groupId, // Store the group ID for relations
             blocks
           }
         });
+
+        // Transform campaign to include group info for consistency
+        const campaignWithGroup = {
+          ...campaign,
+          group: {
+            id: campaign.groupId || campaign.group, // Use groupId if available, fallback to group field
+            name: campaign.group // The group field now contains the actual group name
+          }
+        };
 
         sendJSON(res, 200, {
           success: true,
           message: 'Campaign updated successfully',
           data: {
-            data: campaign
+            data: campaignWithGroup
           }
         }, origin);
         return;
@@ -1486,6 +1632,141 @@ const server = http.createServer(async (req, res) => {
         sendJSON(res, 500, {
           success: false,
           message: 'Server error'
+        }, origin);
+        return;
+      }
+    }
+
+    // =========================
+    // CAMPAIGN ANALYTICS ENDPOINT
+    // =========================
+
+    // Get campaign analytics
+    if (path.startsWith('/api/campaigns/') && path.endsWith('/analytics') && method === 'GET') {
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        sendJSON(res, 401, {
+          success: false,
+          message: 'Access token required'
+        }, origin);
+        return;
+      }
+
+      const token = authHeader.substring(7);
+      const decoded = verifyToken(token);
+      
+      if (!decoded) {
+        sendJSON(res, 401, {
+          success: false,
+          message: 'Invalid token'
+        }, origin);
+        return;
+      }
+
+      // Extract campaign ID from path like /api/campaigns/:id/analytics
+      const pathParts = path.split('/');
+      const campaignId = pathParts[3]; // /api/campaigns/ID/analytics
+
+      try {
+        // Verify the campaign belongs to the user and check status
+        const campaign = await prisma.campaign.findFirst({
+          where: { 
+            id: campaignId,
+            userId: decoded.userId 
+          }
+        });
+
+        if (!campaign) {
+          sendJSON(res, 404, {
+            success: false,
+            message: 'Campaign not found'
+          }, origin);
+          return;
+        }
+
+        // Only show analytics for sent campaigns
+        if (campaign.status !== 'sent') {
+          sendJSON(res, 200, {
+            success: true,
+            data: {
+              totalSent: 0,
+              delivered: 0,
+              opened: 0,
+              clicked: 0,
+              bounced: 0,
+              complained: 0,
+              message: 'No data yet. Campaign has not been sent.'
+            }
+          }, origin);
+          return;
+        }
+
+        // Count total sent emails for this campaign
+        const totalSent = await prisma.sentEmail.count({
+          where: {
+            campaignId: campaignId,
+            userId: decoded.userId
+          }
+        });
+
+        // Count email events by type for this campaign
+        const [delivered, opened, clicked, bounced, complained] = await Promise.all([
+          prisma.emailEvent.count({
+            where: {
+              campaignId: campaignId,
+              userId: decoded.userId,
+              eventType: 'delivered'
+            }
+          }),
+          prisma.emailEvent.count({
+            where: {
+              campaignId: campaignId,
+              userId: decoded.userId,
+              eventType: 'opened'
+            }
+          }),
+          prisma.emailEvent.count({
+            where: {
+              campaignId: campaignId,
+              userId: decoded.userId,
+              eventType: 'clicked'
+            }
+          }),
+          prisma.emailEvent.count({
+            where: {
+              campaignId: campaignId,
+              userId: decoded.userId,
+              eventType: 'bounced'
+            }
+          }),
+          prisma.emailEvent.count({
+            where: {
+              campaignId: campaignId,
+              userId: decoded.userId,
+              eventType: 'complained'
+            }
+          })
+        ]);
+
+        const stats = {
+          totalSent,
+          delivered,
+          opened,
+          clicked,
+          bounced,
+          complained
+        };
+
+        sendJSON(res, 200, {
+          success: true,
+          data: stats
+        }, origin);
+        return;
+      } catch (error) {
+        console.error('Get campaign analytics error:', error);
+        sendJSON(res, 500, {
+          success: false,
+          message: 'Internal server error'
         }, origin);
         return;
       }
@@ -1761,9 +2042,12 @@ async function startServer() {
       console.log('   - PUT  /api/templates/:id');
       console.log('   - DELETE /api/templates/:id');
       console.log('   - GET  /api/campaigns');
+      console.log('   - GET  /api/campaigns/:id');
+      console.log('   - GET  /api/campaigns/:id/analytics');
       console.log('   - POST /api/campaigns');
       console.log('   - PUT  /api/campaigns/:id');
       console.log('   - DELETE /api/campaigns/:id');
+      console.log('   - POST /api/campaigns/send');
       console.log('   - GET  /api/groups');
     });
   } catch (error) {

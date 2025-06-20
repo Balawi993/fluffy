@@ -78,7 +78,8 @@ model Campaign {
   name     String
   subject  String
   sender   String
-  group    String
+  group    String   // Group name for display
+  groupId  String?  // Group UUID for relation
   blocks   Json     // Store the email blocks as JSON
   status   String   @default("draft") // draft, scheduled, sent
   createdAt DateTime @default(now())

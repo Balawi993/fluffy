@@ -86,6 +86,10 @@ export const templatesAPI = {
 export const campaignsAPI = {
   getAll: (params?: { page?: number; limit?: number; search?: string; status?: string }) => 
     api.get('/campaigns', { params }),
+  getById: (id: string) => 
+    api.get(`/campaigns/${id}`),
+  getAnalytics: (id: string) => 
+    api.get(`/campaigns/${id}/analytics`),
   create: (data: { name: string; subject: string; sender: string; group: string; blocks: any[]; status?: string }) => 
     api.post('/campaigns', data),
   update: (id: string, data: { name?: string; subject?: string; sender?: string; group?: string; blocks?: any[]; status?: string }) => 

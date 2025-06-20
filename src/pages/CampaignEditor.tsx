@@ -135,10 +135,20 @@ const CampaignEditor = () => {
   const [recipientGroups, setRecipientGroups] = useState<{ id: string; name: string; count?: number }[]>([]);
   const [groupsLoading, setGroupsLoading] = useState(true);
 
-  // Fetch groups on component mount
+  // Fetch groups and campaign data
   useEffect(() => {
-    fetchGroups();
-  }, []);
+    const loadData = async () => {
+      // Always load groups first
+      await fetchGroups();
+      
+      // If editing, load campaign data after groups are loaded
+      if (isEditing && id) {
+        await fetchCampaignData();
+      }
+    };
+    
+    loadData();
+  }, [id, isEditing]);
 
   const fetchGroups = async () => {
     try {
@@ -146,28 +156,39 @@ const CampaignEditor = () => {
       const response = await groupsAPI.getAll();
       const groups = response.data.data?.data || [];
       
-      // Get contact counts for each group
-      const groupsWithCounts = await Promise.all(
+      // Instead of making individual API calls for each group count,
+      // we'll set the groups immediately and optionally load counts in background
+      const groupsWithCounts = groups.map((group: any) => ({
+        id: group.id, 
+        name: group.name, 
+        count: 0 // Default to 0, will be updated later if needed
+      }));
+      
+      setRecipientGroups(groupsWithCounts);
+      
+      // Load contact counts in background (non-blocking)
+      Promise.all(
         groups.map(async (group: any) => {
           try {
             const contactsResponse = await contactsAPI.getAll({ group: group.name });
             const count = contactsResponse.data.data?.data?.length || 0;
-            return { 
-              id: group.id, 
-              name: group.name, 
-              count 
-            };
+            return { id: group.id, count };
           } catch (err) {
-            return { 
-              id: group.id, 
-              name: group.name, 
-              count: 0 
-            };
+            return { id: group.id, count: 0 };
           }
         })
-      );
+      ).then(counts => {
+        // Update groups with actual counts
+        setRecipientGroups(prevGroups => 
+          prevGroups.map(group => {
+            const countData = counts.find(c => c.id === group.id);
+            return countData ? { ...group, count: countData.count } : group;
+          })
+        );
+      }).catch(err => {
+        console.error('Error loading contact counts:', err);
+      });
       
-      setRecipientGroups(groupsWithCounts);
     } catch (err: any) {
       console.error('Error fetching groups:', err);
       showError('Failed to load recipient groups');
@@ -175,6 +196,62 @@ const CampaignEditor = () => {
       setRecipientGroups([]);
     } finally {
       setGroupsLoading(false);
+    }
+  };
+
+  const fetchCampaignData = async () => {
+    try {
+      console.log('🔍 Fetching campaign data for ID:', id);
+      const response = await campaignsAPI.getById(id!);
+      console.log('📨 Campaign response:', response.data);
+      const campaign = response.data.data?.data || response.data.data;
+      
+      if (campaign) {
+        console.log('✅ Campaign found:', campaign);
+        
+        // Pre-fill the form with existing campaign data
+        setCampaignName(campaign.name || '');
+        setSubjectLine(campaign.subject || '');
+        setSenderName(campaign.sender || '');
+        
+        // Find the group ID from the group name
+        const groupName = campaign.group?.name || campaign.group || '';
+        console.log('🔍 Looking for group:', groupName);
+        
+        // Try to find matching group, but don't wait for groups to be fully loaded
+        if (groupName) {
+          // Check if groups are already loaded
+          if (recipientGroups.length > 0) {
+            const matchingGroup = recipientGroups.find(group => group.name === groupName);
+            console.log('🎯 Matching group found:', matchingGroup);
+            setRecipientGroup(matchingGroup ? matchingGroup.id : '');
+          } else {
+            // Groups not loaded yet, fetch them and then set the recipient group
+            try {
+              const groupsResponse = await groupsAPI.getAll();
+              const groups = groupsResponse.data.data?.data || [];
+              const matchingGroup = groups.find((group: any) => group.name === groupName);
+              if (matchingGroup) {
+                console.log('🎯 Matching group found from fresh fetch:', matchingGroup);
+                setRecipientGroup(matchingGroup.id);
+              }
+            } catch (err) {
+              console.error('Error fetching groups for campaign data:', err);
+            }
+          }
+        }
+        
+        // Set the canvas blocks if they exist
+        if (campaign.blocks && Array.isArray(campaign.blocks)) {
+          console.log('📋 Setting canvas blocks:', campaign.blocks);
+          setCanvasBlocks(campaign.blocks);
+        }
+      } else {
+        console.warn('⚠️ No campaign data found');
+      }
+    } catch (err: any) {
+      console.error('❌ Error fetching campaign data:', err);
+      showError('Failed to load campaign data');
     }
   };
 
@@ -326,12 +403,16 @@ const CampaignEditor = () => {
     setIsSending(true);
     
     try {
+      // Find the group name from the selected group ID
+      const selectedGroup = recipientGroups.find(group => group.id === recipientGroup);
+      const groupName = selectedGroup ? selectedGroup.name : recipientGroup;
+      
       // Create the campaign
       const campaignData = {
         name: campaignName.trim(),
         subject: subjectLine.trim(),
         sender: senderName.trim(),
-        group: recipientGroup,
+        group: groupName, // Use the actual group name, not the ID
         blocks: canvasBlocks,
         status: 'draft' as const
       };
@@ -350,7 +431,7 @@ const CampaignEditor = () => {
       // Send campaign using the new integrated endpoint
       const sendResponse = await campaignsAPI.sendCampaign({
         campaignId,
-        groupName: recipientGroup,
+        groupName: groupName, // Use the actual group name, not the ID
         subject: subjectLine.trim(),
         htmlContent,
         from: `${senderName.trim()} <noreply@fluffly.com>`
