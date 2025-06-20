@@ -35,10 +35,14 @@ fluffly/
 │   └── pages/                # Page components
 ├── public/                   # Public assets
 ├── fluffly-backend/          # Backend code
-│   ├── prisma/               # Database schema and migrations
+│   ├── prisma/               # Database schema (PostgreSQL/Supabase)
 │   │   └── schema.prisma     # Prisma schema definition
+│   ├── generated/            # Generated Prisma client
+│   ├── .env                  # Environment variables
 │   └── basic-server-prisma.js # Main server file
-└── .github/                  # GitHub workflows and templates
+├── .github/                  # GitHub workflows and templates
+├── start-all.bat             # Quick start script
+└── docs/                     # Documentation files
 ```
 
 ## Setup Instructions

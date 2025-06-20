@@ -54,65 +54,109 @@ const Dashboard = () => {
     "5 contacts unsubscribed",
   ];
 
-  // Fetch data from API
+  // Fetch data from API with improved error handling
   const fetchDashboardData = async () => {
     setIsLoading(true);
     
     try {
-      // Fetch contacts count
-      const contactsPromise = contactsAPI.getAll();
+      console.log('🚀 Starting dashboard data fetch...');
       
-      // Fetch templates count
-      const templatesPromise = templatesAPI.getAll();
+      // Helper function to retry API calls with better error info
+      const fetchWithRetry = async (apiCall: () => Promise<any>, name: string, maxRetries = 2) => {
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+          try {
+            console.log(`📊 Fetching ${name}... (attempt ${attempt}/${maxRetries})`);
+            const result = await apiCall();
+            
+            // Extract the data more safely
+            const data = result?.data?.data?.data || result?.data?.data || result?.data || [];
+            const count = Array.isArray(data) ? data.length : 0;
+            
+            console.log(`✅ ${name} fetched successfully:`, {
+              count,
+              dataStructure: typeof result?.data,
+              hasData: !!result?.data,
+              actualData: data
+            });
+            
+            return { data, count };
+          } catch (error: any) {
+            console.log(`❌ ${name} fetch failed (attempt ${attempt}/${maxRetries}):`, {
+              error: error.message,
+              status: error.response?.status,
+              data: error.response?.data
+            });
+            
+            if (attempt === maxRetries) {
+              throw error;
+            }
+            
+            // Wait before retry with exponential backoff
+            await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+          }
+        }
+      };
+
+      // Fetch data with delays between calls
+      console.log('📞 Fetching contacts...');
+      const contactsResult = await fetchWithRetry(() => contactsAPI.getAll(), 'contacts');
+      await new Promise(resolve => setTimeout(resolve, 300));
       
-      // Fetch campaigns count
-      const campaignsPromise = campaignsAPI.getAll();
+      console.log('📞 Fetching templates...');
+      const templatesResult = await fetchWithRetry(() => templatesAPI.getAll(), 'templates');
+      await new Promise(resolve => setTimeout(resolve, 300));
       
-      // Fetch sent campaigns count
-      const sentCampaignsPromise = campaignsAPI.getAll({ status: 'sent' });
+      console.log('📞 Fetching campaigns...');
+      const campaignsResult = await fetchWithRetry(() => campaignsAPI.getAll(), 'campaigns');
+      await new Promise(resolve => setTimeout(resolve, 300));
       
-      // Wait for all requests to complete
-      const [contactsRes, templatesRes, campaignsRes, sentCampaignsRes] = await Promise.all([
-        contactsPromise,
-        templatesPromise,
-        campaignsPromise,
-        sentCampaignsPromise
-      ]);
+      console.log('📞 Fetching sent campaigns...');
+      const sentCampaignsResult = await fetchWithRetry(() => campaignsAPI.getAll({ status: 'sent' }), 'sent campaigns');
       
       // Update stats with actual data
       const updatedStats = [...stats];
       
-      // Update contacts count
-      const contactsCount = contactsRes.data?.data?.length || 0;
-      updatedStats[0] = {
-        ...updatedStats[0],
-        value: contactsCount.toLocaleString(),
-        isLoading: false
-      };
-      
-      // Update sent campaigns count
-      const sentCampaignsCount = sentCampaignsRes.data?.data?.length || 0;
-      updatedStats[1] = {
-        ...updatedStats[1],
-        value: sentCampaignsCount.toLocaleString(),
-        isLoading: false
-      };
-      
-      // Update templates count
-      const templatesCount = templatesRes.data?.data?.length || 0;
-      updatedStats[2] = {
-        ...updatedStats[2],
-        value: templatesCount.toLocaleString(),
-        isLoading: false
-      };
-      
-      // Update last campaign status
-      const allCampaigns = campaignsRes.data?.data || [];
-      if (allCampaigns.length > 0) {
-        // Sort campaigns by date and get the most recent one
-        const sortedCampaigns = [...allCampaigns].sort((a, b) => 
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-        );
+             console.log('📊 Processing results...', {
+         contacts: contactsResult?.count || 0,
+         templates: templatesResult?.count || 0,
+         campaigns: campaignsResult?.count || 0,
+         sentCampaigns: sentCampaignsResult?.count || 0
+       });
+       
+       // Update contacts count
+       const contactsCount = contactsResult?.count || 0;
+       updatedStats[0] = {
+         ...updatedStats[0],
+         value: contactsCount.toLocaleString(),
+         isLoading: false,
+         color: contactsCount > 0 ? "bg-blue-100" : "bg-gray-100"
+       };
+       
+       // Update sent campaigns count
+       const sentCampaignsCount = sentCampaignsResult?.count || 0;
+       updatedStats[1] = {
+         ...updatedStats[1],
+         value: sentCampaignsCount.toLocaleString(),
+         isLoading: false,
+         color: sentCampaignsCount > 0 ? "bg-green-100" : "bg-gray-100"
+       };
+       
+       // Update templates count
+       const templatesCount = templatesResult?.count || 0;
+       updatedStats[2] = {
+         ...updatedStats[2],
+         value: templatesCount.toLocaleString(),
+         isLoading: false,
+         color: templatesCount > 0 ? "bg-purple-100" : "bg-gray-100"
+       };
+       
+       // Update last campaign status
+       const campaignsCount = campaignsResult?.count || 0;
+       if (campaignsCount > 0 && campaignsResult?.data) {
+         // Sort campaigns by date and get the most recent one
+         const sortedCampaigns = [...campaignsResult.data].sort((a, b) => 
+           new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+         );
         
         const lastCampaign = sortedCampaigns[0];
         updatedStats[3] = {
@@ -127,13 +171,30 @@ const Dashboard = () => {
           ...updatedStats[3],
           value: "No Campaigns",
           status: "pending",
+          color: "bg-gray-100",
           isLoading: false
         };
       }
       
       setStats(updatedStats);
-    } catch (error) {
-      console.error('Error fetching dashboard data:', error);
+      console.log('✅ Dashboard data updated successfully!');
+      
+    } catch (error: any) {
+      console.error('❌ Critical error fetching dashboard data:', {
+        error: error.message,
+        status: error.response?.status,
+        data: error.response?.data,
+        stack: error.stack
+      });
+      
+      // Show detailed error state in stats
+      const errorStats = [...stats];
+      errorStats.forEach((stat, index) => {
+        stat.value = `Error ${error.response?.status || 500}`;
+        stat.isLoading = false;
+        stat.color = "bg-red-100";
+      });
+      setStats(errorStats);
     } finally {
       setIsLoading(false);
     }

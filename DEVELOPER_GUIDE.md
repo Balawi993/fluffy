@@ -698,4 +698,145 @@ git push           # Push to remote repository
 - Always use group names for display purposes
 - Group IDs are maintained for relational integrity
 - Both old and new campaign data formats are supported
-- Database migrations were applied using `npx prisma db push` 
+- Database migrations were applied using `npx prisma db push`
+
+## 🔧 دليل حل مشاكل التشغيل الشائعة
+
+### المشكلة 1: تناقضات في إعدادات قاعدة البيانات
+
+**الأعراض**:
+- رسائل خطأ تشير إلى SQLite بينما نستخدم Supabase
+- فشل في الاتصال بقاعدة البيانات
+
+**الحل**:
+```bash
+# 1. تأكد من أن schema.prisma يحتوي على PostgreSQL
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+# 2. تأكد من وجود .env في fluffly-backend/
+DATABASE_URL="postgresql://postgres.xeoaqmawlxxcgeisjhfo:..."
+JWT_SECRET="your-secret-key"
+PORT=5000
+
+# 3. أعد توليد Prisma client
+cd fluffly-backend
+npx prisma generate
+```
+
+### المشكلة 2: فشل تشغيل الخوادم
+
+**الأعراض**:
+- خطأ في العثور على المنافذ
+- عدم تشغيل الخوادم بشكل متزامن
+
+**الحل**:
+```bash
+# 1. تأكد من عدم استخدام المنافذ
+netstat -ano | findstr ":5000\|:5173"
+
+# 2. أوقف العمليات القديمة
+taskkill /F /IM node.exe
+
+# 3. أعد تشغيل الخوادم بالترتيب الصحيح
+cd fluffly-backend && node basic-server-prisma.js
+# في terminal جديد
+npm run dev
+
+# أو استخدم البات فايل
+./start-all.bat
+```
+
+### المشكلة 3: مشاكل في المصادقة
+
+**الأعراض**:
+- `Access token required` errors
+- فشل في تسجيل الدخول
+
+**الحل**:
+```bash
+# 1. تحقق من JWT_SECRET في .env
+echo %JWT_SECRET%  # يجب أن يكون موجود
+
+# 2. احذف tokens قديمة من localStorage
+# في DevTools Console
+localStorage.clear()
+
+# 3. تأكد من تطابق CORS settings
+FRONTEND_URL="http://localhost:5173"
+```
+
+### المشكلة 4: ملفات SQLite الزائدة
+
+**المشكلة**: وجود ملفات SQLite قديمة تسبب تناقضات
+
+**الحل المطبق**:
+```bash
+# تم حذف الملفات التالية:
+- fluffly-backend/prisma/dev.db ❌ (محذوف)
+- temp-project/ ❌ (محذوف)
+- backend/ ❌ (محذوف)
+- ui.md ❌ (محذوف)
+
+# الملفات المهمة الباقية:
+- fluffly-backend/ ✅ (الباك إند الفعلي)
+- src/ ✅ (الفرونت إند)
+- prisma/schema.prisma ✅ (PostgreSQL)
+```
+
+### المشكلة 5: مشاكل Prisma Generate
+
+**الأعراض**:
+- `EPERM: operation not permitted` errors
+- فشل في توليد Prisma client
+
+**الحل**:
+```bash
+# 1. أغلق جميع processes
+taskkill /F /IM node.exe
+
+# 2. احذف generated folder وأعد إنشاؤه
+rm -rf fluffly-backend/generated
+cd fluffly-backend
+npx prisma generate
+
+# 3. أعد تشغيل السيرفر
+node basic-server-prisma.js
+```
+
+## 🚀 الحالة المثلى للنظام
+
+### علامات التشغيل الناجح:
+```
+✅ Connected to Supabase database successfully
+🚀 Server is running on http://localhost:5000
+📊 Environment variables:
+   - DATABASE_URL: ✅ Set
+   - JWT_SECRET: ✅ Set
+🎯 Endpoints available: [قائمة بجميع المسارات]
+VITE v6.3.5  ready in 216 ms
+➜  Local:   http://localhost:5173/
+```
+
+### تحقق من الحالة:
+```bash
+# اختبار الباك إند
+curl http://localhost:5000/health
+
+# اختبار الفرونت إند
+curl http://localhost:5173
+
+# فحص المنافذ
+netstat -ano | findstr ":5000\|:5173"
+```
+
+## 📋 قائمة التحقق السريع
+
+- [ ] `fluffly-backend/.env` موجود ومحدث
+- [ ] `schema.prisma` يشير إلى PostgreSQL
+- [ ] المنافذ 5000 و 5173 غير مستخدمة
+- [ ] لا توجد ملفات SQLite قديمة
+- [ ] `node_modules` محدث في كلا المجلدين
+- [ ] الاتصال بالإنترنت متاح لـ Supabase 

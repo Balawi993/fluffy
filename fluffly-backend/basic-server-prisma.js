@@ -6,8 +6,11 @@ const jwt = require('jsonwebtoken');
 const { PrismaClient } = require('./generated/prisma');
 const { Webhook } = require('svix');
 
-// Initialize Prisma Client
-const prisma = new PrismaClient();
+// Initialize Prisma Client with clean settings
+const prisma = new PrismaClient({
+  log: ['query', 'error', 'warn'],
+  errorFormat: 'pretty'
+});
 
 // Helper function to generate JWT token
 const generateToken = (userId) => {
